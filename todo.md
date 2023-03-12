@@ -1,0 +1,11 @@
+- get source maps working
+- install Roboto font (https://mui.com/material-ui/getting-started/installation/)
+- center everything
+- edit todos
+- delete todos
+- login page
+- create account page
+- multiple editors with websockets
+- kube cluster of http servers
+- load balancer
+- distributed database
