@@ -31,12 +31,20 @@ function init() {
 }
 
 function TodoList({ apiURL }) {
-  // state is "loading", "error", or an object with a single property "todos"
-  // that contains a Map from key to input ref and initial value. The Map is
-  // wrapped in an object so that we can trigger a re-render without copying
-  // the entire Map.
-  const [state, setState] = React.useState(() => ("loading"));
-  const refVersion = React.useRef("");
+  // state is "loading", "error", or an object with properties:
+  // - "todos": a Map from key to input ref and initial value. Wrapping the Map
+  // in an object allows us to trigger a re-render without copying the entire
+  // Map.
+  // - "key": when changed, the entire list is remounted. Why? TodoList is
+  // essentially a list of uncontrolled inputs; the state of each todo is
+  // stored in the DOM. When the todos are loaded and subsequently rendered, we
+  // use the defaultValue prop to set the initial state. Easy peasy. But we run
+  // into a problem when reloading the todos. An input with the same key but
+  // different value won't be remounted, and so defaultValue can't be used to
+  // set its state. So, after reloading the todos, we pass a new key to the
+  // parent, causing all inputs to be remounted and assigned defaultValue.
+  const [state, setState] = React.useState(() => "loading");
+  const refVersion = React.useRef(undefined);
   const refNextKey = React.useRef(0);
   React.useEffect(getTodos, []);
 
@@ -50,24 +58,45 @@ function TodoList({ apiURL }) {
     }
     const { version, todos } = await resp.json();
     refVersion.current = version;
-    const todosMap = new Map();
-    for (const [key, value] of todos) {
-      todosMap.set(key, [React.createRef(), value]);
+    setState({
+      todos: createTodosMap(todos),
+      key: "0"
+    });
+  }
+
+  async function removeTodo(key) {
+    const resp = await fetch(apiURL, {
+      method: "POST",
+      body: JSON.stringify({
+        operation: "delete",
+        version: refVersion.current,
+        key
+      })
+    });
+    if (!resp.ok) {
+      return;
     }
-    setState({ todos: todosMap });
+    //const {version, todos} = await resp.json();
+    const j = await resp.json();
+    console.log(j);
+    const {version, todos} = j;
+    refVersion.current = version;
+    if (todos !== undefined) {
+      setState({
+        todos: createTodosMap(todos),
+        key: state.key === "0" ? "1" : "0"
+      })
+      return;
+    }
+    state.todos.delete(key);
+    setState({ todos: state.todos, key: state.key});
   }
 
   function appendTodo() {
-    const { todos } = state;
+    const { todos, key } = state;
     todos.set(refNextKey.current, [React.createRef(), ""]);
     refNextKey.current++;
-    setState({ todos });
-  }
-
-  function removeTodo(key) {
-    const { todos } = state;
-    todos.delete(key);
-    setState({ todos });
+    setState({ todos, key });
   }
 
   if (state === "error") {
@@ -113,8 +142,16 @@ function TodoList({ apiURL }) {
   }
 
   return (
-    <List>
+    <List key={state.key} >
       {listItems}
     </List>
   );
+}
+
+function createTodosMap(todos) {
+  const todosMap = new Map();
+  for (const [key, value] of todos) {
+    todosMap.set(key, [React.createRef(), value]);
+  }
+  return todosMap
 }
