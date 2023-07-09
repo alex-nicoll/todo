@@ -32,9 +32,9 @@ function init() {
 
 function TodoList({ apiURL }) {
   // state is "loading", "error", or an object with properties:
-  // - "todos": a Map from key to input ref and initial value. Wrapping the Map
-  // in an object allows us to trigger a re-render without copying the entire
-  // Map.
+  // - "todos": a Map from key to input ref, initial value, and disabled state.
+  // Wrapping the Map in an object allows us to trigger a re-render without
+  // copying the entire Map.
   // - "key": when changed, the entire list is remounted. Why? TodoList is
   // essentially a list of uncontrolled inputs; the state of each todo is
   // stored in the DOM. When the todos are loaded and subsequently rendered, we
@@ -42,7 +42,7 @@ function TodoList({ apiURL }) {
   // into a problem when reloading the todos. An input with the same key but
   // different value won't be remounted, and so defaultValue can't be used to
   // set its state. So, after reloading the todos, we pass a new key to the
-  // parent, causing all inputs to be remounted and assigned defaultValue.
+  // parent, causing each input to be remounted and assigned defaultValue.
   const [state, setState] = React.useState(() => "loading");
   const refVersion = React.useRef(undefined);
   const refNextKey = React.useRef(0);
@@ -65,6 +65,7 @@ function TodoList({ apiURL }) {
   }
 
   async function removeTodo(key) {
+    setDisabled(key, true);
     const resp = await fetch(apiURL, {
       method: "POST",
       body: JSON.stringify({
@@ -74,9 +75,9 @@ function TodoList({ apiURL }) {
       })
     });
     if (!resp.ok) {
+      setDisabled(key, false);
       return;
     }
-    //const {version, todos} = await resp.json();
     const j = await resp.json();
     console.log(j);
     const {version, todos} = j;
@@ -89,7 +90,12 @@ function TodoList({ apiURL }) {
       return;
     }
     state.todos.delete(key);
-    setState({ todos: state.todos, key: state.key});
+    setState({ todos: state.todos, key: state.key });
+  }
+
+  function setDisabled(key, disabled) {
+    state.todos.get(key).disabled = disabled;
+    setState({ todos: state.todos, key: state.key })
   }
 
   function appendTodo() {
@@ -115,7 +121,7 @@ function TodoList({ apiURL }) {
     // We leave the TextFields uncontrolled to avoid re-rendering the entire
     // list every time the user types. A ref is passed to each TextField so
     // that we can access the TextField's value.
-    state.todos.forEach(([inputRef, initialValue], key) => listItems.push(
+    state.todos.forEach(({ inputRef, initialValue, disabled }, key) => listItems.push(
       <ListItem key={key}>
         <TextField
           multiline
@@ -126,7 +132,7 @@ function TodoList({ apiURL }) {
           inputRef={inputRef}
           defaultValue={initialValue}
         />
-        <IconButton onClick={() => removeTodo(key)}>
+        <IconButton onClick={disabled ? undefined : () => removeTodo(key)}>
           <Clear />
         </IconButton>
       </ListItem>
@@ -151,7 +157,11 @@ function TodoList({ apiURL }) {
 function createTodosMap(todos) {
   const todosMap = new Map();
   for (const [key, value] of todos) {
-    todosMap.set(key, [React.createRef(), value]);
+    todosMap.set(key, {
+      inputRef: React.createRef(),
+      initialValue: value,
+      disabled: false
+    });
   }
-  return todosMap
+  return todosMap;
 }
