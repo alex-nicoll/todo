@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/google/uuid"
 	"golang.org/x/exp/slices"
 )
 
@@ -53,9 +54,13 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.serveDelete(w, dr)
 			return
 		}
+		ar := &appendRqst{}
+		if err := json.Unmarshal(body, ar); err == nil && ar.Operation == "append" {
+			h.serveAppend(w, ar)
+			return
+		}
 		log.Printf("received unrecognized JSON: %s", body)
 		w.WriteHeader(http.StatusBadRequest)
-		return
 	}
 }
 
@@ -68,12 +73,11 @@ type getResp struct {
 
 func (h *apiHandler) serveGet(w http.ResponseWriter) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	writeJson(w, &getResp{
 		Version: h.version,
 		Todos:   h.todos,
 	})
-	h.mu.Unlock()
-	return
 }
 
 type deleteRqst struct {
@@ -119,13 +123,49 @@ func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
 		Version: h.version,
 		Todos:   h.todos,
 	})
-	return
 }
 
 func (h *apiHandler) deleteTodo(todoIndex int) {
 	h.todos = slices.Delete(h.todos, todoIndex, todoIndex+1)
 	incrementVersion(&(h.version))
 	log.Println(h.version, h.todos)
+}
+
+type appendRqst struct {
+	Operation string `json:"operation"`
+	Version   uint32 `json:"version"`
+}
+
+type appendResp struct {
+	Version uint32 `json:"version"`
+	Key     string `json:"key"`
+}
+
+type appendMismatchResp struct {
+	Version uint32      `json:"version"`
+	Todos   [][2]string `json:"todos"`
+}
+
+func (h *apiHandler) serveAppend(w http.ResponseWriter, r *appendRqst) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	key := uuid.NewString()
+	h.todos = append(h.todos, [2]string{key, ""})
+	v := h.version
+	incrementVersion(&(h.version))
+	if r.Version == v {
+		writeJson(w, &appendResp{
+			Version: h.version,
+			Key:     key,
+		})
+		return
+	}
+	// version mismatch
+	log.Println("version mismatch")
+	writeJson(w, &appendMismatchResp{
+		Version: h.version,
+		Todos:   h.todos,
+	})
 }
 
 func incrementVersion(v *uint32) {

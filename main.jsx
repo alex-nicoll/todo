@@ -45,12 +45,11 @@ function TodoList({ apiURL }) {
   // parent, causing each input to be remounted and assigned defaultValue.
   const [state, setState] = React.useState(() => "loading");
   const refVersion = React.useRef(undefined);
-  const refNextKey = React.useRef(0);
-  React.useEffect(getTodos, []);
+  React.useEffect(initTodos, []);
 
   console.log(state);
 
-  async function getTodos() {
+  async function initTodos() {
     const resp = await fetch(apiURL, { method: "GET" });
     if (!resp.ok) {
       setState("error");
@@ -64,19 +63,26 @@ function TodoList({ apiURL }) {
     });
   }
 
-  async function removeTodo(key) {
-    setDisabled(key, true);
+  // post sends a POST request and partially handles the response. post
+  // includes the current todo list version in the request, and updates the
+  // current version to match the version in the response.
+  //
+  // It returns "failed" if the request failed.
+  // It returns "reloaded" if the request succeeded and the todo list has been
+  // downloaded and rerendered due to a version mismatch detected by the
+  // server.
+  // Otherwise, it returns the response payload.
+  async function post(operation, args) {
     const resp = await fetch(apiURL, {
       method: "POST",
       body: JSON.stringify({
-        operation: "delete",
+        operation,
         version: refVersion.current,
-        key
+        ...args
       })
     });
     if (!resp.ok) {
-      setDisabled(key, false);
-      return;
+      return "failed";
     }
     const j = await resp.json();
     console.log(j);
@@ -87,22 +93,41 @@ function TodoList({ apiURL }) {
         todos: createTodosMap(todos),
         key: state.key === "0" ? "1" : "0"
       })
+      return "reloaded";
+    }
+    return j;
+  }
+
+  async function removeTodo(key) {
+    setDisabled(key, true);
+    const result = await post("delete", { key });
+    if (result === "failed") {
+      setDisabled(key, false);
+      return;
+    }
+    if (result === "reloaded") {
       return;
     }
     state.todos.delete(key);
-    setState({ todos: state.todos, key: state.key });
+    setState({ ...state });
   }
 
   function setDisabled(key, disabled) {
     state.todos.get(key).disabled = disabled;
-    setState({ todos: state.todos, key: state.key })
+    setState({ ...state })
   }
 
-  function appendTodo() {
-    const { todos, key } = state;
-    todos.set(refNextKey.current, [React.createRef(), ""]);
-    refNextKey.current++;
-    setState({ todos, key });
+  async function appendTodo() {
+    const result = await post("append");
+    if (result === "failed" || result === "reloaded") {
+      return;
+    }
+    state.todos.set(result.key, {
+      inputRef: React.createRef(),
+      initialValue: "",
+      disabled: false
+    });
+    setState({ ...state });
   }
 
   if (state === "error") {
