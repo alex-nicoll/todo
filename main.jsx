@@ -72,6 +72,32 @@ function TodoList({ apiURL }) {
     });
   }
 
+  async function removeTodo(key) {
+    // Disable the todo while it is being deleted so that the user can't edit
+    // it or delete it a second time.
+    state.todos.get(key).disabled = true;
+    setState({ ...state })
+    const result = await enqueue(() => post("delete", { key }));
+    if (result === "done") {
+      return;
+    }
+    state.todos.delete(key);
+    setState({ ...state });
+  }
+
+  async function appendTodo() {
+    const result = await enqueue(() => post("append"));
+    if (result === "done") {
+      return;
+    }
+    state.todos.set(result.key, {
+      inputRef: React.createRef(),
+      initialValue: "",
+      disabled: false
+    });
+    setState({ ...state });
+  }
+
   // enqueue adds an async function to the back of the task queue. It returns a
   // Promise representing the function's result.
   function enqueue(task) {
@@ -141,32 +167,6 @@ function TodoList({ apiURL }) {
       return "done";
     }
     return result;
-  }
-
-  async function removeTodo(key) {
-    // Disable the todo while it is being deleted so that the user can't edit
-    // it or delete it a second time.
-    state.todos.get(key).disabled = true;
-    setState({ ...state })
-    const result = await enqueue(() => post("delete", { key }));
-    if (result === "done") {
-      return;
-    }
-    state.todos.delete(key);
-    setState({ ...state });
-  }
-
-  async function appendTodo() {
-    const result = await enqueue(() => post("append"));
-    if (result === "done") {
-      return;
-    }
-    state.todos.set(result.key, {
-      inputRef: React.createRef(),
-      initialValue: "",
-      disabled: false
-    });
-    setState({ ...state });
   }
 
   if (state === "error") {
