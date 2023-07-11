@@ -34,9 +34,9 @@ function init() {
 function TodoList({ apiURL }) {
 
   // state is "loading", "error", or an object with properties:
-  // - "todos": a Map from key to input ref, initial value, and disabled state.
-  // Wrapping the Map in an object allows us to trigger a re-render without
-  // copying the entire Map.
+  // - "todos": a Map from key to input ref and initial value. Wrapping the Map
+  // in an object allows us to trigger a re-render without copying the entire
+  // Map.
   // - "key": when changed, the entire list is remounted. Why? TodoList is
   // essentially a list of uncontrolled inputs; the state of each todo is
   // stored in the DOM. When the todos are loaded and subsequently rendered, we
@@ -72,17 +72,10 @@ function TodoList({ apiURL }) {
     });
   }
 
-  async function removeTodo(key) {
-    // Disable the todo while it is being deleted so that the user can't edit
-    // it or delete it a second time.
-    state.todos.get(key).disabled = true;
-    setState({ ...state })
-    const result = await enqueue(() => post("delete", { key }));
-    if (result === "done") {
-      return;
-    }
+  function removeTodo(key) {
     state.todos.delete(key);
     setState({ ...state });
+    enqueue(() => post("delete", { key }));
   }
 
   async function appendTodo() {
@@ -93,7 +86,6 @@ function TodoList({ apiURL }) {
     state.todos.set(result.key, {
       inputRef: React.createRef(),
       initialValue: "",
-      disabled: false
     });
     setState({ ...state });
   }
@@ -191,7 +183,7 @@ function TodoList({ apiURL }) {
     // We leave the TextFields uncontrolled to avoid re-rendering the entire
     // list every time the user types. A ref is passed to each TextField so
     // that we can access the TextField's value.
-    state.todos.forEach(({ inputRef, initialValue, disabled }, key) => listItems.push(
+    state.todos.forEach(({ inputRef, initialValue }, key) => listItems.push(
       <ListItem key={key}>
         <TextField
           multiline
@@ -202,7 +194,7 @@ function TodoList({ apiURL }) {
           inputRef={inputRef}
           defaultValue={initialValue}
         />
-        <IconButton onClick={disabled ? undefined : () => removeTodo(key)}>
+        <IconButton onClick={() => removeTodo(key)}>
           <Clear />
         </IconButton>
       </ListItem>
@@ -230,7 +222,6 @@ function createTodosMap(todos) {
     todosMap.set(key, {
       inputRef: React.createRef(),
       initialValue: value,
-      disabled: false
     });
   }
   return todosMap;
