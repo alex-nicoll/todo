@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as ReactDOM from "react-dom";
 import {
+  Alert,
   CircularProgress,
   Container,
   IconButton,
@@ -59,12 +60,11 @@ function TodoList({ apiURL }) {
   console.log(state);
 
   async function initTodos() {
-    const resp = await fetch(apiURL, { method: "GET" });
-    if (!resp.ok) {
-      setState("error");
+    const result = await fetchObject({ method: "GET" });
+    if (result === "failed") {
       return;
     }
-    const { version, todos } = await resp.json();
+    const { version, todos } = result;
     refVersion.current = version;
     setState({
       todos: createTodosMap(todos),
@@ -79,17 +79,48 @@ function TodoList({ apiURL }) {
     return refLastTask.current;
   }
 
+  // fetchObject calls fetch with apiUrl and the given options, checks the
+  // status code, and parses the response body as JSON. If an error is
+  // encountered, fetchObject sets state to "error" and returns "failed".
+  // Otherwise, it returns the parsed response body.
+  async function fetchObject(options) {
+    let resp;
+    try {
+      resp = await fetch(apiURL, options);
+    } catch (e) {
+      console.error(e);
+      setState("error");
+      return "failed";
+    }
+    if (resp.status !== 200) {
+      setState("error");
+      return "failed";
+    }
+    let v;
+    try {
+      v = await resp.json();
+    } catch (e) {
+      console.error(e)
+      setState("error");
+      return "failed";
+    }
+    console.log(v);
+    return v;
+  }
+
   // post sends a POST request and partially handles the response. post
   // includes the current todo list version in the request, and updates the
   // current version to match the version in the response.
   //
-  // It returns "failed" if the request failed.
-  // It returns "reloaded" if the request succeeded and the todo list has been
-  // downloaded and rerendered due to a version mismatch detected by the
-  // server.
-  // Otherwise, it returns the response payload.
+  // It returns "done" if the request failed, or if the request succeeded and
+  // the todo list has been downloaded and rerendered due to a version mismatch
+  // detected by the server. If the request failed, then setState("error") has
+  // already been called. Essentially, "done" indicates that there are no
+  // further state updates to perform and the caller can safely return.
+  //
+  // Otherwise, it returns the response body parsed as JSON.
   async function post(operation, args) {
-    const resp = await fetch(apiURL, {
+    const result = await fetchObject({
       method: "POST",
       body: JSON.stringify({
         operation,
@@ -97,47 +128,37 @@ function TodoList({ apiURL }) {
         ...args
       })
     });
-    if (!resp.ok) {
-      return "failed";
+    if (result === "failed") {
+      return "done";
     }
-    const j = await resp.json();
-    console.log(j);
-    const {version, todos} = j;
+    const {version, todos} = result;
     refVersion.current = version;
     if (todos !== undefined) {
       setState({
         todos: createTodosMap(todos),
         key: state.key === "0" ? "1" : "0"
       })
-      return "reloaded";
+      return "done";
     }
-    return j;
+    return result;
   }
 
   async function removeTodo(key) {
     // Disable the todo while it is being deleted so that the user can't edit
     // it or delete it a second time.
-    setDisabled(key, true);
+    state.todos.get(key).disabled = true;
+    setState({ ...state })
     const result = await enqueue(() => post("delete", { key }));
-    if (result === "failed") {
-      setDisabled(key, false);
-      return;
-    }
-    if (result === "reloaded") {
+    if (result === "done") {
       return;
     }
     state.todos.delete(key);
     setState({ ...state });
   }
 
-  function setDisabled(key, disabled) {
-    state.todos.get(key).disabled = disabled;
-    setState({ ...state })
-  }
-
   async function appendTodo() {
     const result = await enqueue(() => post("append"));
-    if (result === "failed" || result === "reloaded") {
+    if (result === "done") {
       return;
     }
     state.todos.set(result.key, {
@@ -149,7 +170,13 @@ function TodoList({ apiURL }) {
   }
 
   if (state === "error") {
-    return "There was a problem loading the list. Please try again later.";
+    return (
+      <Alert severity="error">
+        There was a problem completing the requested action. If this problem
+        persists, please try again later.
+      </Alert>
+    );
+    return ;
   }
 
   let listItems;
