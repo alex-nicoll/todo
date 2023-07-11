@@ -31,6 +31,7 @@ function init() {
 }
 
 function TodoList({ apiURL }) {
+
   // state is "loading", "error", or an object with properties:
   // - "todos": a Map from key to input ref, initial value, and disabled state.
   // Wrapping the Map in an object allows us to trigger a re-render without
@@ -44,7 +45,15 @@ function TodoList({ apiURL }) {
   // set its state. So, after reloading the todos, we pass a new key to the
   // parent, causing each input to be remounted and assigned defaultValue.
   const [state, setState] = React.useState(() => "loading");
+
+  // refVersion contains the current todo list version.
   const refVersion = React.useRef(undefined);
+
+  // refLastTask is a queue of tasks implemented as a Promise chain.
+  // It allows requests after the initial GET to be sent serially so that each
+  // request contains the correct todo list version.
+  const refLastTask = React.useRef(Promise.resolve());
+
   React.useEffect(initTodos, []);
 
   console.log(state);
@@ -61,6 +70,13 @@ function TodoList({ apiURL }) {
       todos: createTodosMap(todos),
       key: "0"
     });
+  }
+
+  // enqueue adds an async function to the back of the task queue. It returns a
+  // Promise representing the function's result.
+  function enqueue(task) {
+    refLastTask.current = refLastTask.current.then(task);
+    return refLastTask.current;
   }
 
   // post sends a POST request and partially handles the response. post
@@ -99,8 +115,10 @@ function TodoList({ apiURL }) {
   }
 
   async function removeTodo(key) {
+    // Disable the todo while it is being deleted so that the user can't edit
+    // it or delete it a second time.
     setDisabled(key, true);
-    const result = await post("delete", { key });
+    const result = await enqueue(() => post("delete", { key }));
     if (result === "failed") {
       setDisabled(key, false);
       return;
@@ -118,7 +136,7 @@ function TodoList({ apiURL }) {
   }
 
   async function appendTodo() {
-    const result = await post("append");
+    const result = await enqueue(() => post("append"));
     if (result === "failed" || result === "reloaded") {
       return;
     }
