@@ -114,11 +114,7 @@ func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
 		writeJson(w, &deleteResp{Version: h.version})
 		return
 	}
-	// version mismatch
 	log.Println("version mismatch")
-	if todoIndex != -1 {
-		h.deleteTodo(todoIndex)
-	}
 	writeJson(w, &deleteMismatchResp{
 		Version: h.version,
 		Todos:   h.todos,
@@ -160,7 +156,6 @@ func (h *apiHandler) serveAppend(w http.ResponseWriter, r *appendRqst) {
 		})
 		return
 	}
-	// version mismatch
 	log.Println("version mismatch")
 	writeJson(w, &appendMismatchResp{
 		Version: h.version,
