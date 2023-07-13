@@ -55,6 +55,10 @@ function TodoList({ apiURL }) {
   // request contains the correct todo list version.
   const refLastTask = React.useRef(Promise.resolve());
 
+  // refTodosUpdating is the set of todo keys for which there are pending
+  // update operations.
+  const refTodosUpdating = React.useRef(new Set());
+
   React.useEffect(initTodos, []);
 
   console.log(state);
@@ -76,6 +80,28 @@ function TodoList({ apiURL }) {
     state.todos.delete(key);
     setState({ ...state });
     enqueue(() => post("delete", { key }));
+  }
+
+  async function updateTodo(key) {
+    if (refTodosUpdating.current.has(key)) {
+      return;
+    }
+    refTodosUpdating.current.add(key);
+    // Wait for 2 seconds.
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (!state.todos.has(key)) {
+      // todo was deleted while we were waiting.
+      refTodosUpdating.current.delete(key);
+      return;
+    }
+    // For some reason, removing the key from refTodosUpdating immediately
+    // results in us sometimes reading from a null ref. To avoid this, wait for
+    // the update operation to complete before removing the key.
+    await enqueue(() => post("update", {
+      key,
+      value: state.todos.get(key).inputRef.current.value
+    }));
+    refTodosUpdating.current.delete(key);
   }
 
   async function appendTodo() {
@@ -102,6 +128,7 @@ function TodoList({ apiURL }) {
   // encountered, fetchObject sets state to "error" and returns "failed".
   // Otherwise, it returns the parsed response body.
   async function fetchObject(options) {
+    console.log(options);
     let resp;
     try {
       resp = await fetch(apiURL, options);
@@ -193,6 +220,7 @@ function TodoList({ apiURL }) {
           spellcheck="false"
           inputRef={inputRef}
           defaultValue={initialValue}
+          onChange={() => updateTodo(key)}
         />
         <IconButton onClick={() => removeTodo(key)}>
           <Clear />

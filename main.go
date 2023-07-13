@@ -54,6 +54,11 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.serveDelete(w, dr)
 			return
 		}
+		ur := &updateRqst{}
+		if err := json.Unmarshal(body, ur); err == nil && ur.Operation == "update" {
+			h.serveUpdate(w, ur)
+			return
+		}
 		ar := &appendRqst{}
 		if err := json.Unmarshal(body, ar); err == nil && ar.Operation == "append" {
 			h.serveAppend(w, ar)
@@ -98,33 +103,57 @@ type deleteMismatchResp struct {
 func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	todoIndex := -1
-	for i, todo := range h.todos {
-		if todo[0] == r.Key {
-			todoIndex = i
-			break
-		}
-	}
-	if r.Version == h.version {
-		if todoIndex == -1 {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		h.deleteTodo(todoIndex)
-		writeJson(w, &deleteResp{Version: h.version})
+	if r.Version != h.version {
+		log.Println("version mismatch")
+		writeJson(w, &deleteMismatchResp{
+			Version: h.version,
+			Todos:   h.todos,
+		})
 		return
 	}
-	log.Println("version mismatch")
-	writeJson(w, &deleteMismatchResp{
-		Version: h.version,
-		Todos:   h.todos,
-	})
+	todoIndex := h.accessTodo(r.Key, w)
+	if todoIndex != -1 {
+		h.todos = slices.Delete(h.todos, todoIndex, todoIndex+1)
+		incrementVersion(&(h.version))
+		log.Println(h.version, h.todos)
+		writeJson(w, &deleteResp{Version: h.version})
+	}
 }
 
-func (h *apiHandler) deleteTodo(todoIndex int) {
-	h.todos = slices.Delete(h.todos, todoIndex, todoIndex+1)
-	incrementVersion(&(h.version))
-	log.Println(h.version, h.todos)
+type updateRqst struct {
+	Operation string
+	Version   uint32
+	Key       string
+	Value     string
+}
+
+type updateResp struct {
+	Version uint32 `json:"version"`
+}
+
+type updateMismatchResp struct {
+	Version uint32      `json:"version"`
+	Todos   [][2]string `json:"todos"`
+}
+
+func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if r.Version != h.version {
+		log.Println("version mismatch")
+		writeJson(w, &updateMismatchResp{
+			Version: h.version,
+			Todos:   h.todos,
+		})
+		return
+	}
+	todoIndex := h.accessTodo(r.Key, w)
+	if todoIndex != -1 {
+		h.todos[todoIndex][1] = r.Value
+		incrementVersion(&(h.version))
+		log.Println(h.version, h.todos)
+		writeJson(w, &updateResp{Version: h.version})
+	}
 }
 
 type appendRqst struct {
@@ -161,6 +190,26 @@ func (h *apiHandler) serveAppend(w http.ResponseWriter, r *appendRqst) {
 		Version: h.version,
 		Todos:   h.todos,
 	})
+}
+
+// accessTodo finds the index of the todo with the given key.
+// If the todo doesn't exist, accessTodo returns -1 and writes status code 400
+// Bad Request to the ResponseWriter.
+// Otherwise, it returns the todo index.
+func (h *apiHandler) accessTodo(key string, w http.ResponseWriter) int {
+	todoIndex := -1
+	for i, todo := range h.todos {
+		if todo[0] == key {
+			todoIndex = i
+			break
+		}
+	}
+	if todoIndex == -1 {
+		// Client has the correct version but the todo doesn't exist - a
+		// potential client error.
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	return todoIndex
 }
 
 func incrementVersion(v *uint32) {
