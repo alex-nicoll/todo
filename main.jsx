@@ -2,6 +2,7 @@ import * as React from "react";
 import * as ReactDOM from "react-dom";
 import {
   Alert,
+  Box,
   CircularProgress,
   Container,
   IconButton,
@@ -25,12 +26,35 @@ function init() {
   const root = ReactDOM.createRoot(document.getElementById("root"));
   root.render(
     <Container maxWidth="sm">
-      <Typography variant="h3" component="h1">
-        To-Do
-      </Typography>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between"
+        }}
+      >
+        <Typography variant="h3" component="h1">
+          To-Do
+        </Typography>
+        <Typography>
+          <SyncIndicator todoStore={todoStore} />
+        </Typography>
+      </Box>
       <TodoList todoStore={todoStore} />
     </Container>
   );
+}
+
+function SyncIndicator({ todoStore }) {
+  console.log("rendering SyncIndicator");
+
+  const [_, setState] = React.useState({});
+  React.useEffect(
+    () => todoStore.syncIndicatorDidMount(() => setState({})),
+    []
+  );
+
+  return todoStore.isSyncing() ? "Syncing..." : undefined;
 }
 
 function TodoList({ todoStore }) {
