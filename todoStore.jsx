@@ -5,7 +5,7 @@
 // each todo render independently. I.e., when the user types, only the text
 // field that they are typing into renders - not the entire todo list. This
 // improves performance when typing.
-export function newTodoStore(apiURL) {
+export function newTodoStore(apiURL, syncStore) {
 
   // state is "loading", "error", or a map from todo key to todo value. 
   let state = "loading";
@@ -22,15 +22,9 @@ export function newTodoStore(apiURL) {
   // operations.
   const todosUpdating = new Set();
 
-  // syncCounter is the number of synchronization operations (update, delete,
-  // etc.) pending or in progress.
-  let syncCounter = 0;
-
   let renderList;
 
   const mapRenderTextField = new Map();
-
-  let renderSyncIndicator;
 
   // listDidMount should be called when the component representing the entire
   // todo list mounts. It should be passed a function that forces the component
@@ -61,43 +55,9 @@ export function newTodoStore(apiURL) {
     return () => mapRenderTextField.delete(key);
   }
 
-  // syncIndicatorDidMount should be called when the sync indicator component
-  // mounts. It should be passed a function that forces the component to
-  // render.
-  //
-  // The render function is called whenever the return value of isSyncing()
-  // changes.
-  //
-  // syncIndicatorDidMount returns a function that should be called before the
-  // component unmounts.
-  function syncIndicatorDidMount(render) {
-    renderSyncIndicator = render;
-    return () => renderSyncIndicator = undefined;
-  }
-
   // getState returns "loading", "error", or a map from todo key to todo value. 
   function getState() {
     return state;
-  }
-
-  // isSyncing returns true if changes are currently being synchronized with
-  // the server.
-  function isSyncing() {
-    return syncCounter !== 0;
-  }
-
-  function incrementSyncCounter() {
-    syncCounter++;
-    if (syncCounter === 1) {
-      renderSyncIndicator();
-    }
-  }
-
-  function decrementSyncCounter() {
-    syncCounter--;
-    if (syncCounter === 0) {
-      renderSyncIndicator();
-    }
   }
 
   async function initTodos() {
@@ -122,23 +82,23 @@ export function newTodoStore(apiURL) {
     if (todosUpdating.has(key)) {
       return;
     }
-    incrementSyncCounter();
+    syncStore.increment();
     todosUpdating.add(key);
     // Wait for 2 seconds.
     await new Promise((resolve) => setTimeout(resolve, 2000));
     todosUpdating.delete(key);
     if (!state.has(key)) {
       // todo was deleted while we were waiting.
-      decrementSyncCounter();
+      syncStore.decrement();
       return;
     }
     // Instead of using enqueue, update lastTask directly to avoid incrementing
-    // and decrementing syncCounter an additional time.
+    // and decrementing the sync count an additional time.
     lastTask = lastTask.then(
       () => post("update", { key, value: state.get(key) })
     );
     await lastTask;
-    decrementSyncCounter();
+    syncStore.decrement();
   }
 
   async function appendTodo() {
@@ -152,11 +112,11 @@ export function newTodoStore(apiURL) {
 
   // enqueue adds an async function to the back of the task queue. It returns a
   // Promise representing the function's result.
-  // While the task is queued or executing, syncCounter is increased by one.
+  // While the task is queued or executing, the sync count is increased by one.
   function enqueue(task) {
-    incrementSyncCounter();
+    syncStore.increment();
     const result = lastTask.then(task);
-    lastTask = result.then(decrementSyncCounter);
+    lastTask = result.then(syncStore.decrement);
     return result;
   }
 
@@ -224,9 +184,7 @@ export function newTodoStore(apiURL) {
   return {
     listDidMount,
     textFieldDidMount,
-    syncIndicatorDidMount,
     getState,
-    isSyncing,
     deleteTodo,
     updateTodo,
     appendTodo

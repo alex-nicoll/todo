@@ -16,13 +16,15 @@ import {
 } from "@mui/material";
 import Add from "@mui/icons-material/Add";
 import Clear from "@mui/icons-material/Clear";
-import { newTodoStore } from "./todoStore.jsx"
+import { newTodoStore } from "./todoStore.jsx";
+import { newSyncStore } from "./syncStore.jsx";
 
 init();
 
 function init() {
   const apiURL = `${document.location.origin}/api`;
-  const todoStore = newTodoStore(apiURL);
+  const syncStore = newSyncStore();
+  const todoStore = newTodoStore(apiURL, syncStore);
   const root = ReactDOM.createRoot(document.getElementById("root"));
   root.render(
     <Container maxWidth="sm">
@@ -37,7 +39,7 @@ function init() {
           To-Do
         </Typography>
         <Typography>
-          <SyncIndicator todoStore={todoStore} />
+          <SyncIndicator syncStore={syncStore} />
         </Typography>
       </Box>
       <TodoList todoStore={todoStore} />
@@ -45,16 +47,16 @@ function init() {
   );
 }
 
-function SyncIndicator({ todoStore }) {
+function SyncIndicator({ syncStore }) {
   console.log("rendering SyncIndicator");
 
   const [_, setState] = React.useState({});
   React.useEffect(
-    () => todoStore.syncIndicatorDidMount(() => setState({})),
+    () => syncStore.syncIndicatorDidMount(() => setState({})),
     []
   );
 
-  return todoStore.isSyncing() ? "Syncing..." : undefined;
+  return syncStore.isSyncing() ? "Syncing..." : undefined;
 }
 
 function TodoList({ todoStore }) {
