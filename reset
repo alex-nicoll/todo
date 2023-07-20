@@ -1,0 +1,34 @@
+-- This PostgreSQL script reverts the database to its initial state.
+
+DROP TABLE IF EXISTS todos;
+DROP TABLE IF EXISTS users;
+
+CREATE TABLE users (
+  id      uuid PRIMARY KEY,
+  name    varchar(30) UNIQUE NOT NULL,
+  version int NOT NULL CHECK (version >= 0)
+);
+
+CREATE TABLE todos (
+  id      uuid PRIMARY KEY,
+  user_id uuid NOT NULL REFERENCES users (id),
+  value   text NOT NULL,
+  created timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create the default user.
+INSERT INTO users (id, name, version) 
+  VALUES (gen_random_uuid(), 'default', 0);
+
+-- Get the default user ID, and insert a new todo with that user ID.
+INSERT INTO todos (id, user_id, value)
+  SELECT gen_random_uuid(), id, 'Todo A' FROM users WHERE name = 'default';
+
+INSERT INTO todos (id, user_id, value)
+  SELECT gen_random_uuid(), id, 'Todo B' FROM users WHERE name = 'default';
+
+INSERT INTO todos (id, user_id, value)
+  SELECT gen_random_uuid(), id, 'Todo C' FROM users WHERE name = 'default';
+
+INSERT INTO todos (id, user_id, value)
+  SELECT gen_random_uuid(), id, 'Todo D' FROM users WHERE name = 'default';
