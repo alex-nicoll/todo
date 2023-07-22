@@ -261,7 +261,7 @@ type queriable interface {
 }
 
 func getTodos(q queriable, uid string) [][2]string {
-	query := "SELECT id, value FROM todos WHERE user_id = $1"
+	query := "SELECT id, value FROM todos WHERE user_id = $1 ORDER BY created"
 	rows, err := q.Query(context.Background(), query, uid)
 	defer rows.Close()
 	if err != nil {
