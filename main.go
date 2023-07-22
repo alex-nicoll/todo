@@ -141,7 +141,7 @@ func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
 	todoIndex := h.accessTodo(r.Key, w)
 	if todoIndex != -1 {
 		h.todos = slices.Delete(h.todos, todoIndex, todoIndex+1)
-		incrementVersion(&(h.version))
+		incrementVersion_deprecated(&(h.version))
 		log.Println(h.version, h.todos)
 		writeJson(w, &deleteResp{Version: h.version})
 	}
@@ -177,7 +177,7 @@ func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
 	todoIndex := h.accessTodo(r.Key, w)
 	if todoIndex != -1 {
 		h.todos[todoIndex][1] = r.Value
-		incrementVersion(&(h.version))
+		incrementVersion_deprecated(&(h.version))
 		log.Println(h.version, h.todos)
 		writeJson(w, &updateResp{Version: h.version})
 	}
@@ -185,38 +185,97 @@ func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
 
 type appendRqst struct {
 	Operation string `json:"operation"`
-	Version   uint32 `json:"version"`
+	Version   int32  `json:"version"`
 }
 
 type appendResp struct {
-	Version uint32 `json:"version"`
+	Version int32  `json:"version"`
 	Key     string `json:"key"`
 }
 
 type appendMismatchResp struct {
-	Version uint32      `json:"version"`
+	Version int32       `json:"version"`
 	Todos   [][2]string `json:"todos"`
 }
 
 func (h *apiHandler) serveAppend(w http.ResponseWriter, r *appendRqst) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	key := uuid.NewString()
-	h.todos = append(h.todos, [2]string{key, ""})
-	v := h.version
-	incrementVersion(&(h.version))
-	if r.Version == v {
-		writeJson(w, &appendResp{
-			Version: h.version,
-			Key:     key,
-		})
+	resp := h.txAppend(r)
+	if resp == nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	log.Println("version mismatch")
-	writeJson(w, &appendMismatchResp{
-		Version: h.version,
-		Todos:   h.todos,
+	writeJson(w, resp)
+}
+
+func (h *apiHandler) txAppend(r *appendRqst) any {
+	// Note that we carry out the append operation even if the client's version
+	// doesn't match. This is considered safe; there is no way for an append to
+	// result in data loss, even if the client has a stale view.
+	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
+		IsoLevel:       pgx.Serializable,
+		AccessMode:     pgx.ReadWrite,
+		DeferrableMode: pgx.NotDeferrable,
 	})
+	// Rollback is a no-op if the transaction is already committed/aborted.
+	defer tx.Rollback(context.Background())
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		return nil
+	}
+	key := appendTodo(tx, h.defaultUid)
+	if key == "" {
+		return nil
+	}
+	version, ok := getVersion(tx, h.defaultUid)
+	if !ok {
+		return nil
+	}
+	newVersion, ok := incrementVersion(tx, version, h.defaultUid)
+	if !ok {
+		return nil
+	}
+	if r.Version == version {
+		err = tx.Commit(context.Background())
+		if err != nil {
+			log.Printf("Failed to commit transaction: %v", err)
+			return nil
+		}
+		return &appendResp{
+			Version: newVersion,
+			Key:     key,
+		}
+	}
+	log.Println("version mismatch")
+	todos := getTodos(tx, h.defaultUid)
+	if todos == nil {
+		return nil
+	}
+	err = tx.Commit(context.Background())
+	if err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		return nil
+	}
+	return &appendMismatchResp{
+		Version: newVersion,
+		Todos:   todos,
+	}
+}
+
+func appendTodo(tx pgx.Tx, uid string) string {
+	key := uuid.NewString()
+	cmd := "INSERT INTO todos (id, user_id, value) VALUES ($1, $2, '')"
+	ct, err := tx.Exec(context.Background(), cmd, key, uid)
+	if err != nil {
+		log.Printf("Failed to append todo for UID %v: %v", uid, err)
+		return ""
+	}
+	rowsAffected := ct.RowsAffected()
+	if rowsAffected != 1 {
+		log.Printf("Failed to append todo for UID %v. Unexpected number "+
+			"of rows affected (%v)", uid, rowsAffected)
+		return ""
+	}
+	return key
 }
 
 // accessTodo finds the index of the todo with the given key.
@@ -239,13 +298,40 @@ func (h *apiHandler) accessTodo(key string, w http.ResponseWriter) int {
 	return todoIndex
 }
 
-// TODO rewrite to work with int32
-func incrementVersion(v *uint32) {
+func incrementVersion_deprecated(v *uint32) {
 	if *v == math.MaxUint32 {
 		*v = 0
 	} else {
 		*v++
 	}
+}
+
+// incrementVersion increments the todo list version for the user with the
+// given user ID.
+// tx is the transaction in which to perform the associated UPDATE.
+// v is the current todo list version.
+// uid is the user ID
+// incrementVersion returns the new v and a boolean indicating whether the
+// UPDATE command was successful.
+func incrementVersion(tx pgx.Tx, v int32, uid string) (int32, bool) {
+	if v == math.MaxInt32 {
+		v = 0
+	} else {
+		v++
+	}
+	ct, err := tx.Exec(context.Background(),
+		"UPDATE users SET version = $1 WHERE id = $2", v, uid)
+	if err != nil {
+		log.Printf("Failed to increment version for UID %v: %v", uid, err)
+		return v, false
+	}
+	rowsAffected := ct.RowsAffected()
+	if rowsAffected != 1 {
+		log.Printf("Failed to increment version for UID %v. Unexpected number "+
+			"of rows affected (%v)", uid, rowsAffected)
+		return v, false
+	}
+	return v, true
 }
 
 func writeJson(w http.ResponseWriter, v any) {
@@ -318,7 +404,7 @@ func (h *apiHandler) txGet() *getResp {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
 	}
-	version, ok := getValue[int32](tx, "SELECT version FROM users WHERE id = $1", h.defaultUid)
+	version, ok := getVersion(tx, h.defaultUid)
 	if !ok {
 		return nil
 	}
@@ -335,4 +421,8 @@ func (h *apiHandler) txGet() *getResp {
 		Version: version,
 		Todos:   todos,
 	}
+}
+
+func getVersion(q queriable, uid string) (int32, bool) {
+	return getValue[int32](q, "SELECT version FROM users WHERE id = $1", uid)
 }
