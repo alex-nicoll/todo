@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
 	"math"
 	"net/http"
+	"os"
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/exp/slices"
 )
 
@@ -19,6 +23,25 @@ func main() {
 	http.HandleFunc("/main.js", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./main.js")
 	})
+
+	dbUrl, ok := os.LookupEnv("DB_URL")
+	if !ok {
+		log.Fatal("DB_URL not set")
+	}
+	pool, err := pgxpool.New(context.Background(), dbUrl)
+	defer pool.Close()
+	if err != nil {
+		log.Fatalf("Failed to create database connection pool: %v\n", err)
+	}
+
+	// In the future, the user ID should be read from an authorization token
+	// included in the client's request.
+	defaultUid, ok := getValue[string](pool, "SELECT id FROM users WHERE name = 'default'")
+	if !ok {
+		os.Exit(1)
+	}
+	log.Println("default user ID:", defaultUid)
+
 	http.Handle("/api", &apiHandler{
 		version: 0,
 		todos: [][2]string{
@@ -27,15 +50,19 @@ func main() {
 			[2]string{"c", "todo C"},
 			[2]string{"d", "todo D"},
 		},
-		mu: &sync.Mutex{},
+		mu:         &sync.Mutex{},
+		pool:       pool,
+		defaultUid: defaultUid,
 	})
 	http.ListenAndServe(":8080", nil)
 }
 
 type apiHandler struct {
-	version uint32
-	todos   [][2]string
-	mu      *sync.Mutex
+	version    uint32
+	todos      [][2]string
+	mu         *sync.Mutex
+	pool       *pgxpool.Pool
+	defaultUid string
 }
 
 func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -72,17 +99,17 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Fields must be exported in order for encoding/json to access them.
 
 type getResp struct {
-	Version uint32      `json:"version"`
+	Version int32       `json:"version"`
 	Todos   [][2]string `json:"todos"`
 }
 
 func (h *apiHandler) serveGet(w http.ResponseWriter) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	writeJson(w, &getResp{
-		Version: h.version,
-		Todos:   h.todos,
-	})
+	resp := h.txGet()
+	if resp == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writeJson(w, resp)
 }
 
 type deleteRqst struct {
@@ -212,6 +239,7 @@ func (h *apiHandler) accessTodo(key string, w http.ResponseWriter) int {
 	return todoIndex
 }
 
+// TODO rewrite to work with int32
 func incrementVersion(v *uint32) {
 	if *v == math.MaxUint32 {
 		*v = 0
@@ -225,5 +253,86 @@ func writeJson(w http.ResponseWriter, v any) {
 	err := enc.Encode(v)
 	if err != nil {
 		log.Println(err)
+	}
+}
+
+type queriable interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+func getTodos(q queriable, uid string) [][2]string {
+	query := "SELECT id, value FROM todos WHERE user_id = $1"
+	rows, err := q.Query(context.Background(), query, uid)
+	defer rows.Close()
+	if err != nil {
+		log.Printf("Failed to execute query \"%v\": %v", query, err)
+		return nil
+	}
+	todos := [][2]string{}
+	for rows.Next() {
+		var id string
+		var value string
+		if err := rows.Scan(&id, &value); err != nil {
+			log.Printf("Failed to scan result of query \"%v\": %v", query, err)
+			return nil
+		}
+		todos = append(todos, [2]string{id, value})
+	}
+	return todos
+}
+
+// getValue executes a PostgreSQL query where the result is a single row with a
+// single column.
+// The first return value is the single value extracted from the query result.
+// It is the zero value of V if the query failed.
+// The second return value is a boolean indicating whether the query succeeded.
+// args are additional arguments to pass to q.Query.
+func getValue[V any](q queriable, query string, args ...any) (V, bool) {
+	rows, err := q.Query(context.Background(), query, args...)
+	defer rows.Close()
+	var value V
+	if err != nil {
+		log.Printf("Failed to execute query \"%v\": %v", query, err)
+		return value, false
+	}
+	if hasNext := rows.Next(); !hasNext {
+		log.Printf("No rows returned by query \"%v\"", query)
+		return value, false
+	}
+	if err := rows.Scan(&value); err != nil {
+		log.Printf("Failed to scan result of statement \"%v\": %v", query, err)
+		return value, false
+	}
+	return value, true
+}
+
+func (h *apiHandler) txGet() *getResp {
+	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
+		IsoLevel:       pgx.Serializable,
+		AccessMode:     pgx.ReadOnly,
+		DeferrableMode: pgx.NotDeferrable,
+	})
+	// Rollback is a no-op if the transaction is already committed/aborted.
+	defer tx.Rollback(context.Background())
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		return nil
+	}
+	version, ok := getValue[int32](tx, "SELECT version FROM users WHERE id = $1", h.defaultUid)
+	if !ok {
+		return nil
+	}
+	todos := getTodos(tx, h.defaultUid)
+	if todos == nil {
+		return nil
+	}
+	err = tx.Commit(context.Background())
+	if err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		return nil
+	}
+	return &getResp{
+		Version: version,
+		Todos:   todos,
 	}
 }
