@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/exp/slices"
 )
 
 func main() {
@@ -114,37 +113,111 @@ func (h *apiHandler) serveGet(w http.ResponseWriter) {
 
 type deleteRqst struct {
 	Operation string
-	Version   uint32
+	Version   int32
 	Key       string
 }
 
 type deleteResp struct {
-	Version uint32 `json:"version"`
+	Version int32 `json:"version"`
 }
 
 type deleteMismatchResp struct {
-	Version uint32      `json:"version"`
+	Version int32       `json:"version"`
 	Todos   [][2]string `json:"todos"`
 }
 
 func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if r.Version != h.version {
-		log.Println("version mismatch")
-		writeJson(w, &deleteMismatchResp{
-			Version: h.version,
-			Todos:   h.todos,
-		})
+	resp := h.txDelete(r)
+	if resp == "bad request" {
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	todoIndex := h.accessTodo(r.Key, w)
-	if todoIndex != -1 {
-		h.todos = slices.Delete(h.todos, todoIndex, todoIndex+1)
-		incrementVersion_deprecated(&(h.version))
-		log.Println(h.version, h.todos)
-		writeJson(w, &deleteResp{Version: h.version})
+	if resp == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
+	writeJson(w, resp)
+}
+
+// txDelete returns a response struct if the transaction was successful, "bad
+// request" if the transaction failed due to a problem with the request, or nil
+// if the transaction failed for some other reason.
+func (h *apiHandler) txDelete(r *deleteRqst) any {
+	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
+		IsoLevel:       pgx.Serializable,
+		AccessMode:     pgx.ReadWrite,
+		DeferrableMode: pgx.NotDeferrable,
+	})
+	// Rollback is a no-op if the transaction is already committed/aborted.
+	defer tx.Rollback(context.Background())
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		return nil
+	}
+	version, ok := getVersion(tx, h.defaultUid)
+	if !ok {
+		return nil
+	}
+	if r.Version != version {
+		log.Println("version mismatch")
+		todos := getTodos(tx, h.defaultUid)
+		if todos == nil {
+			return nil
+		}
+		err = tx.Commit(context.Background())
+		if err != nil {
+			log.Printf("Failed to commit transaction: %v", err)
+			return nil
+		}
+		return &deleteMismatchResp{
+			Version: version,
+			Todos:   todos,
+		}
+	}
+	deleteResult := deleteTodo(tx, r.Key, h.defaultUid)
+	if deleteResult == "failed" {
+		return nil
+	}
+	if deleteResult == "nonexistent" {
+		return "bad request"
+	}
+	newVersion, ok := incrementVersion(tx, version, h.defaultUid)
+	if !ok {
+		return nil
+	}
+	err = tx.Commit(context.Background())
+	if err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		return nil
+	}
+	return &deleteResp{Version: newVersion}
+}
+
+// deleteTodo attempts to delete a todo, returning "success" if the delete was
+// successful, "nonexistent" if the todo doesn't exist, or "failure" if the
+// operation failed for some other reason.
+func deleteTodo(tx pgx.Tx, key string, uid string) string {
+	// Although todos.id may be a UUID, don't rely on this. Assume that todo.id
+	// is unique only in the context of a specific user.
+	cmd := "DELETE FROM todos WHERE id = $1 AND user_id = $2"
+	ct, err := tx.Exec(context.Background(), cmd, key, uid)
+	if err != nil {
+		log.Printf("Failed to delete todo with key %v and UID %v: %v",
+			key, uid, err)
+		return "failure"
+	}
+	rowsAffected := ct.RowsAffected()
+	if rowsAffected == 0 {
+		log.Printf("Failed to delete todo with key %v and UID %v. todo does "+
+			"not exist.", key, uid, rowsAffected)
+		return "nonexistent"
+	}
+	if rowsAffected != 1 {
+		log.Printf("Failed to delete todo with key %v and UID %v. Unexpected number "+
+			"of rows affected (%v)", key, uid, rowsAffected)
+		return "failure"
+	}
+	return "success"
 }
 
 type updateRqst struct {
