@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -117,17 +118,18 @@ type deleteRqst struct {
 	Key       string
 }
 
-type deleteResp struct {
+type mutateResp struct {
 	Version int32 `json:"version"`
 }
 
-type deleteMismatchResp struct {
+type versionMismatchResp struct {
 	Version int32       `json:"version"`
 	Todos   [][2]string `json:"todos"`
 }
 
 func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
-	resp := h.txDelete(r)
+	resp := h.txMutate(r.Version, r.Key,
+		&deleteOperation{id: r.Key, uid: h.defaultUid})
 	if resp == "bad request" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -139,10 +141,23 @@ func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
 	writeJson(w, resp)
 }
 
-// txDelete returns a response struct if the transaction was successful, "bad
+type deleteOperation struct {
+	id  string
+	uid string
+}
+
+func (d *deleteOperation) run(tx pgx.Tx) (pgconn.CommandTag, error) {
+	return tx.Exec(context.Background(),
+		"DELETE FROM todos WHERE id = $1 AND user_id = $2", d.id, d.uid)
+}
+
+// txMutate runs a transaction that mutates a particular todo. rqstVersion and
+// rqstId are the todo list version and todo ID in the request that initiated
+// the transaction. op is the operation (e.g. UPDATE, DELETE) to perform.
+// txMutate returns a response struct if the transaction was successful, "bad
 // request" if the transaction failed due to a problem with the request, or nil
 // if the transaction failed for some other reason.
-func (h *apiHandler) txDelete(r *deleteRqst) any {
+func (h *apiHandler) txMutate(rqstVersion int32, rqstId string, op execOperation) any {
 	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
 		IsoLevel:       pgx.Serializable,
 		AccessMode:     pgx.ReadWrite,
@@ -158,7 +173,7 @@ func (h *apiHandler) txDelete(r *deleteRqst) any {
 	if !ok {
 		return nil
 	}
-	if r.Version != version {
+	if rqstVersion != version {
 		log.Println("version mismatch")
 		todos := getTodos(tx, h.defaultUid)
 		if todos == nil {
@@ -169,16 +184,16 @@ func (h *apiHandler) txDelete(r *deleteRqst) any {
 			log.Printf("Failed to commit transaction: %v", err)
 			return nil
 		}
-		return &deleteMismatchResp{
+		return &versionMismatchResp{
 			Version: version,
 			Todos:   todos,
 		}
 	}
-	deleteResult := deleteTodo(tx, r.Key, h.defaultUid)
-	if deleteResult == "failed" {
+	mutateResult := mutateTodo(tx, op, rqstId, h.defaultUid)
+	if mutateResult == "failed" {
 		return nil
 	}
-	if deleteResult == "nonexistent" {
+	if mutateResult == "nonexistent" {
 		return "bad request"
 	}
 	newVersion, ok := incrementVersion(tx, version, h.defaultUid)
@@ -190,31 +205,33 @@ func (h *apiHandler) txDelete(r *deleteRqst) any {
 		log.Printf("Failed to commit transaction: %v", err)
 		return nil
 	}
-	return &deleteResp{Version: newVersion}
+	return &mutateResp{Version: newVersion}
 }
 
-// deleteTodo attempts to delete a todo, returning "success" if the delete was
-// successful, "nonexistent" if the todo doesn't exist, or "failure" if the
-// operation failed for some other reason.
-func deleteTodo(tx pgx.Tx, key string, uid string) string {
-	// Although todos.id may be a UUID, don't rely on this. Assume that todo.id
-	// is unique only in the context of a specific user.
-	cmd := "DELETE FROM todos WHERE id = $1 AND user_id = $2"
-	ct, err := tx.Exec(context.Background(), cmd, key, uid)
+type execOperation interface {
+	// run must call tx.Exec and return the result.
+	run(tx pgx.Tx) (pgconn.CommandTag, error)
+}
+
+// mutateTodo attempts to mutate a todo (e.g. DELETE, UPDATE) by running op.
+// It returns "success" if the delete was successful, "nonexistent" if the todo
+// doesn't exist, or "failure" if the operation failed for some other reason.
+func mutateTodo(tx pgx.Tx, op execOperation, id string, uid string) string {
+	ct, err := op.run(tx)
 	if err != nil {
-		log.Printf("Failed to delete todo with key %v and UID %v: %v",
-			key, uid, err)
+		log.Printf("Failed to mutate todo with ID %v and UID %v: %v",
+			id, uid, err)
 		return "failure"
 	}
 	rowsAffected := ct.RowsAffected()
 	if rowsAffected == 0 {
-		log.Printf("Failed to delete todo with key %v and UID %v. todo does "+
-			"not exist.", key, uid, rowsAffected)
+		log.Printf("Failed to mutate todo with ID %v and UID %v. todo does "+
+			"not exist.", id, uid, rowsAffected)
 		return "nonexistent"
 	}
 	if rowsAffected != 1 {
-		log.Printf("Failed to delete todo with key %v and UID %v. Unexpected number "+
-			"of rows affected (%v)", key, uid, rowsAffected)
+		log.Printf("Failed to mutate todo with ID %v and UID %v. Unexpected number "+
+			"of rows affected (%v)", id, uid, rowsAffected)
 		return "failure"
 	}
 	return "success"
@@ -227,33 +244,24 @@ type updateRqst struct {
 	Value     string
 }
 
-type updateResp struct {
-	Version uint32 `json:"version"`
-}
-
-type updateMismatchResp struct {
-	Version uint32      `json:"version"`
-	Todos   [][2]string `json:"todos"`
-}
-
 func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if r.Version != h.version {
-		log.Println("version mismatch")
-		writeJson(w, &updateMismatchResp{
-			Version: h.version,
-			Todos:   h.todos,
-		})
-		return
-	}
-	todoIndex := h.accessTodo(r.Key, w)
-	if todoIndex != -1 {
-		h.todos[todoIndex][1] = r.Value
-		incrementVersion_deprecated(&(h.version))
-		log.Println(h.version, h.todos)
-		writeJson(w, &updateResp{Version: h.version})
-	}
+	//h.mu.Lock()
+	//defer h.mu.Unlock()
+	//if r.Version != h.version {
+	//	log.Println("version mismatch")
+	//	writeJson(w, &versionMismatchResp{
+	//		Version: h.version,
+	//		Todos:   h.todos,
+	//	})
+	//	return
+	//}
+	//todoIndex := h.accessTodo(r.Key, w)
+	//if todoIndex != -1 {
+	//	h.todos[todoIndex][1] = r.Value
+	//	incrementVersion_deprecated(&(h.version))
+	//	log.Println(h.version, h.todos)
+	//	writeJson(w, &updateResp{Version: h.version})
+	//}
 }
 
 type appendRqst struct {
@@ -264,11 +272,6 @@ type appendRqst struct {
 type appendResp struct {
 	Version int32  `json:"version"`
 	Key     string `json:"key"`
-}
-
-type appendMismatchResp struct {
-	Version int32       `json:"version"`
-	Todos   [][2]string `json:"todos"`
 }
 
 func (h *apiHandler) serveAppend(w http.ResponseWriter, r *appendRqst) {
@@ -328,7 +331,7 @@ func (h *apiHandler) txAppend(r *appendRqst) any {
 		log.Printf("Failed to commit transaction: %v", err)
 		return nil
 	}
-	return &appendMismatchResp{
+	return &versionMismatchResp{
 		Version: newVersion,
 		Todos:   todos,
 	}
@@ -349,34 +352,6 @@ func appendTodo(tx pgx.Tx, uid string) string {
 		return ""
 	}
 	return key
-}
-
-// accessTodo finds the index of the todo with the given key.
-// If the todo doesn't exist, accessTodo returns -1 and writes status code 400
-// Bad Request to the ResponseWriter.
-// Otherwise, it returns the todo index.
-func (h *apiHandler) accessTodo(key string, w http.ResponseWriter) int {
-	todoIndex := -1
-	for i, todo := range h.todos {
-		if todo[0] == key {
-			todoIndex = i
-			break
-		}
-	}
-	if todoIndex == -1 {
-		// Client has the correct version but the todo doesn't exist - a
-		// potential client error.
-		w.WriteHeader(http.StatusBadRequest)
-	}
-	return todoIndex
-}
-
-func incrementVersion_deprecated(v *uint32) {
-	if *v == math.MaxUint32 {
-		*v = 0
-	} else {
-		*v++
-	}
 }
 
 // incrementVersion increments the todo list version for the user with the
