@@ -84,13 +84,6 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Fields must be exported in order for encoding/json to access them.
-
-type getResp struct {
-	Version int32       `json:"version"`
-	Todos   [][2]string `json:"todos"`
-}
-
 func (h *apiHandler) serveGet(w http.ResponseWriter) {
 	resp := h.txGet()
 	if resp == nil {
@@ -100,19 +93,35 @@ func (h *apiHandler) serveGet(w http.ResponseWriter) {
 	writeJson(w, resp)
 }
 
-type deleteRqst struct {
-	Operation string
-	Version   int32
-	Key       string
-}
-
-type mutateResp struct {
-	Version int32 `json:"version"`
-}
-
-type versionMismatchResp struct {
-	Version int32       `json:"version"`
-	Todos   [][2]string `json:"todos"`
+func (h *apiHandler) txGet() *getResp {
+	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
+		IsoLevel:       pgx.Serializable,
+		AccessMode:     pgx.ReadOnly,
+		DeferrableMode: pgx.NotDeferrable,
+	})
+	// Rollback is a no-op if the transaction is already committed/aborted.
+	defer tx.Rollback(context.Background())
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		return nil
+	}
+	version, ok := getVersion(tx, h.defaultUid)
+	if !ok {
+		return nil
+	}
+	todos := getTodos(tx, h.defaultUid)
+	if todos == nil {
+		return nil
+	}
+	err = tx.Commit(context.Background())
+	if err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		return nil
+	}
+	return &getResp{
+		Version: version,
+		Todos:   todos,
+	}
 }
 
 func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
@@ -129,14 +138,23 @@ func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
 	writeJson(w, resp)
 }
 
-type deleteOperation struct {
-	id  string
-	uid string
+func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
+	resp := h.txMutate(r.Version, r.Key,
+		&updateOperation{id: r.Key, uid: h.defaultUid, value: r.Value})
+	if resp == "bad request" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if resp == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writeJson(w, resp)
 }
 
-func (d *deleteOperation) run(tx pgx.Tx) (pgconn.CommandTag, error) {
-	return tx.Exec(context.Background(),
-		"DELETE FROM todos WHERE id = $1 AND user_id = $2", d.id, d.uid)
+type execOperation interface {
+	// run must call tx.Exec and return the result.
+	run(tx pgx.Tx) (pgconn.CommandTag, error)
 }
 
 // txMutate runs a transaction that mutates a particular todo. rqstVersion and
@@ -194,78 +212,6 @@ func (h *apiHandler) txMutate(rqstVersion int32, rqstId string, op execOperation
 		return nil
 	}
 	return &mutateResp{Version: newVersion}
-}
-
-type execOperation interface {
-	// run must call tx.Exec and return the result.
-	run(tx pgx.Tx) (pgconn.CommandTag, error)
-}
-
-// mutateTodo attempts to mutate a todo (e.g. DELETE, UPDATE) by running op.
-// It returns "success" if the delete was successful, "nonexistent" if the todo
-// doesn't exist, or "failure" if the operation failed for some other reason.
-func mutateTodo(tx pgx.Tx, op execOperation, id string, uid string) string {
-	ct, err := op.run(tx)
-	if err != nil {
-		log.Printf("Failed to mutate todo with ID %v and UID %v: %v",
-			id, uid, err)
-		return "failure"
-	}
-	rowsAffected := ct.RowsAffected()
-	if rowsAffected == 0 {
-		log.Printf("Failed to mutate todo with ID %v and UID %v. todo does "+
-			"not exist.", id, uid, rowsAffected)
-		return "nonexistent"
-	}
-	if rowsAffected != 1 {
-		log.Printf("Failed to mutate todo with ID %v and UID %v. Unexpected number "+
-			"of rows affected (%v)", id, uid, rowsAffected)
-		return "failure"
-	}
-	return "success"
-}
-
-type updateRqst struct {
-	Operation string
-	Version   int32
-	Key       string
-	Value     string
-}
-
-func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
-	resp := h.txMutate(r.Version, r.Key,
-		&updateOperation{id: r.Key, uid: h.defaultUid, value: r.Value})
-	if resp == "bad request" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	if resp == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	writeJson(w, resp)
-}
-
-type updateOperation struct {
-	id    string
-	uid   string
-	value string
-}
-
-func (u *updateOperation) run(tx pgx.Tx) (pgconn.CommandTag, error) {
-	return tx.Exec(context.Background(),
-		"UPDATE todos SET value = $1 WHERE id = $2 AND user_id = $3",
-		u.value, u.id, u.uid)
-}
-
-type appendRqst struct {
-	Operation string `json:"operation"`
-	Version   int32  `json:"version"`
-}
-
-type appendResp struct {
-	Version int32  `json:"version"`
-	Key     string `json:"key"`
 }
 
 func (h *apiHandler) serveAppend(w http.ResponseWriter, r *appendRqst) {
@@ -331,6 +277,52 @@ func (h *apiHandler) txAppend(r *appendRqst) any {
 	}
 }
 
+type deleteOperation struct {
+	id  string
+	uid string
+}
+
+func (d *deleteOperation) run(tx pgx.Tx) (pgconn.CommandTag, error) {
+	return tx.Exec(context.Background(),
+		"DELETE FROM todos WHERE id = $1 AND user_id = $2", d.id, d.uid)
+}
+
+type updateOperation struct {
+	id    string
+	uid   string
+	value string
+}
+
+func (u *updateOperation) run(tx pgx.Tx) (pgconn.CommandTag, error) {
+	return tx.Exec(context.Background(),
+		"UPDATE todos SET value = $1 WHERE id = $2 AND user_id = $3",
+		u.value, u.id, u.uid)
+}
+
+// mutateTodo attempts to mutate a todo (e.g. DELETE, UPDATE) by running op.
+// It returns "success" if the operation succeeded, "nonexistent" if the todo
+// doesn't exist, or "failure" if the operation failed for some other reason.
+func mutateTodo(tx pgx.Tx, op execOperation, id string, uid string) string {
+	ct, err := op.run(tx)
+	if err != nil {
+		log.Printf("Failed to mutate todo with ID %v and UID %v: %v",
+			id, uid, err)
+		return "failure"
+	}
+	rowsAffected := ct.RowsAffected()
+	if rowsAffected == 0 {
+		log.Printf("Failed to mutate todo with ID %v and UID %v. todo does "+
+			"not exist.", id, uid, rowsAffected)
+		return "nonexistent"
+	}
+	if rowsAffected != 1 {
+		log.Printf("Failed to mutate todo with ID %v and UID %v. Unexpected number "+
+			"of rows affected (%v)", id, uid, rowsAffected)
+		return "failure"
+	}
+	return "success"
+}
+
 func appendTodo(tx pgx.Tx, uid string) string {
 	key := uuid.NewString()
 	cmd := "INSERT INTO todos (id, user_id, value) VALUES ($1, $2, '')"
@@ -376,14 +368,6 @@ func incrementVersion(tx pgx.Tx, v int32, uid string) (int32, bool) {
 	return v, true
 }
 
-func writeJson(w http.ResponseWriter, v any) {
-	enc := json.NewEncoder(w)
-	err := enc.Encode(v)
-	if err != nil {
-		log.Println(err)
-	}
-}
-
 type queriable interface {
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
@@ -409,8 +393,8 @@ func getTodos(q queriable, uid string) [][2]string {
 	return todos
 }
 
-// getValue executes a PostgreSQL query where the result is a single row with a
-// single column.
+// getValue executes a query where the result is a single row with a single
+// column.
 // The first return value is the single value extracted from the query result.
 // It is the zero value of V if the query failed.
 // The second return value is a boolean indicating whether the query succeeded.
@@ -434,37 +418,14 @@ func getValue[V any](q queriable, query string, args ...any) (V, bool) {
 	return value, true
 }
 
-func (h *apiHandler) txGet() *getResp {
-	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
-		IsoLevel:       pgx.Serializable,
-		AccessMode:     pgx.ReadOnly,
-		DeferrableMode: pgx.NotDeferrable,
-	})
-	// Rollback is a no-op if the transaction is already committed/aborted.
-	defer tx.Rollback(context.Background())
-	if err != nil {
-		log.Printf("Failed to start transaction: %v", err)
-		return nil
-	}
-	version, ok := getVersion(tx, h.defaultUid)
-	if !ok {
-		return nil
-	}
-	todos := getTodos(tx, h.defaultUid)
-	if todos == nil {
-		return nil
-	}
-	err = tx.Commit(context.Background())
-	if err != nil {
-		log.Printf("Failed to commit transaction: %v", err)
-		return nil
-	}
-	return &getResp{
-		Version: version,
-		Todos:   todos,
-	}
-}
-
 func getVersion(q queriable, uid string) (int32, bool) {
 	return getValue[int32](q, "SELECT version FROM users WHERE id = $1", uid)
+}
+
+func writeJson(w http.ResponseWriter, v any) {
+	enc := json.NewEncoder(w)
+	err := enc.Encode(v)
+	if err != nil {
+		log.Println(err)
+	}
 }
