@@ -8,7 +8,6 @@ import (
 	"math"
 	"net/http"
 	"os"
-	"sync"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -43,14 +42,6 @@ func main() {
 	log.Println("default user ID:", defaultUid)
 
 	http.Handle("/api", &apiHandler{
-		version: 0,
-		todos: [][2]string{
-			[2]string{"a", "todo A"},
-			[2]string{"b", "todo B"},
-			[2]string{"c", "todo C"},
-			[2]string{"d", "todo D"},
-		},
-		mu:         &sync.Mutex{},
 		pool:       pool,
 		defaultUid: defaultUid,
 	})
@@ -58,9 +49,6 @@ func main() {
 }
 
 type apiHandler struct {
-	version    uint32
-	todos      [][2]string
-	mu         *sync.Mutex
 	pool       *pgxpool.Pool
 	defaultUid string
 }
@@ -239,29 +227,35 @@ func mutateTodo(tx pgx.Tx, op execOperation, id string, uid string) string {
 
 type updateRqst struct {
 	Operation string
-	Version   uint32
+	Version   int32
 	Key       string
 	Value     string
 }
 
 func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
-	//h.mu.Lock()
-	//defer h.mu.Unlock()
-	//if r.Version != h.version {
-	//	log.Println("version mismatch")
-	//	writeJson(w, &versionMismatchResp{
-	//		Version: h.version,
-	//		Todos:   h.todos,
-	//	})
-	//	return
-	//}
-	//todoIndex := h.accessTodo(r.Key, w)
-	//if todoIndex != -1 {
-	//	h.todos[todoIndex][1] = r.Value
-	//	incrementVersion_deprecated(&(h.version))
-	//	log.Println(h.version, h.todos)
-	//	writeJson(w, &updateResp{Version: h.version})
-	//}
+	resp := h.txMutate(r.Version, r.Key,
+		&updateOperation{id: r.Key, uid: h.defaultUid, value: r.Value})
+	if resp == "bad request" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	if resp == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writeJson(w, resp)
+}
+
+type updateOperation struct {
+	id    string
+	uid   string
+	value string
+}
+
+func (u *updateOperation) run(tx pgx.Tx) (pgconn.CommandTag, error) {
+	return tx.Exec(context.Background(),
+		"UPDATE todos SET value = $1 WHERE id = $2 AND user_id = $3",
+		u.value, u.id, u.uid)
 }
 
 type appendRqst struct {
