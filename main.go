@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"math"
@@ -35,8 +37,9 @@ func main() {
 
 	// In the future, the user ID should be read from an authorization token
 	// included in the client's request.
-	defaultUid, ok := getValue[string](pool, "SELECT id FROM users WHERE name = 'default'")
-	if !ok {
+	defaultUid, err := getValue[string](pool, "SELECT id FROM users WHERE name = 'default'")
+	if err != nil {
+		log.Println(err)
 		os.Exit(1)
 	}
 	log.Println("default user ID:", defaultUid)
@@ -377,7 +380,7 @@ func getTodos(q queriable, uid string) [][2]string {
 	rows, err := q.Query(context.Background(), query, uid)
 	defer rows.Close()
 	if err != nil {
-		log.Printf("Failed to execute query \"%v\": %v", query, err)
+		log.Printf("Failed to get todos for UID \"%v\": %v", uid, err)
 		return nil
 	}
 	todos := [][2]string{}
@@ -385,7 +388,8 @@ func getTodos(q queriable, uid string) [][2]string {
 		var id string
 		var value string
 		if err := rows.Scan(&id, &value); err != nil {
-			log.Printf("Failed to scan result of query \"%v\": %v", query, err)
+			log.Printf("Failed to scan query result while getting todos for UID "+
+				"\"%v\": %v", query, err)
 			return nil
 		}
 		todos = append(todos, [2]string{id, value})
@@ -395,31 +399,34 @@ func getTodos(q queriable, uid string) [][2]string {
 
 // getValue executes a query where the result is a single row with a single
 // column.
-// The first return value is the single value extracted from the query result.
-// It is the zero value of V if the query failed.
-// The second return value is a boolean indicating whether the query succeeded.
 // args are additional arguments to pass to q.Query.
-func getValue[V any](q queriable, query string, args ...any) (V, bool) {
+// The first return value is the single value extracted from the query result.
+// If the query failed, getValue returns the zero value of V and a non-nil error.
+func getValue[V any](q queriable, query string, args ...any) (V, error) {
 	rows, err := q.Query(context.Background(), query, args...)
 	defer rows.Close()
 	var value V
 	if err != nil {
-		log.Printf("Failed to execute query \"%v\": %v", query, err)
-		return value, false
+		return value, fmt.Errorf("failed to execute query: %v", err)
 	}
 	if hasNext := rows.Next(); !hasNext {
-		log.Printf("No rows returned by query \"%v\"", query)
-		return value, false
+		return value, errors.New("no rows returned by query")
 	}
 	if err := rows.Scan(&value); err != nil {
-		log.Printf("Failed to scan result of statement \"%v\": %v", query, err)
-		return value, false
+		return value, fmt.Errorf("failed to scan result of query: %v", err)
 	}
-	return value, true
+	return value, nil
 }
 
+// getVersion gets the todo list version for the given user ID uid, returning
+// the version and a boolean indicating whether the operation was successful.
 func getVersion(q queriable, uid string) (int32, bool) {
-	return getValue[int32](q, "SELECT version FROM users WHERE id = $1", uid)
+	v, err := getValue[int32](q, "SELECT version FROM users WHERE id = $1", uid)
+	if err != nil {
+		log.Printf("Failed to get version for UID %v: %v", err)
+		return v, false
+	}
+	return v, true
 }
 
 func writeJson(w http.ResponseWriter, v any) {
