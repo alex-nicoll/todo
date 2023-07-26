@@ -1,6 +1,21 @@
 package main
 
+// This file contains type definitions used to marshal/unmarshal data via the
+// encoding/json package.
 // Fields must be exported in order for encoding/json to access them.
+
+type loginRqst struct {
+	Operation string `json:"operation"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+}
+
+type loginSuccessResp struct {
+	Token string `json:"token"`
+}
+
+// Login failure is indicated by an empty object ({}).
+type loginFailureResp struct{}
 
 type getResp struct {
 	Version int32       `json:"version"`
@@ -24,6 +39,9 @@ type mutateResp struct {
 	Version int32 `json:"version"`
 }
 
+// The client can differentiate between a successful mutate response and a
+// version mismatch response by checking for the existence of "todos" in the
+// response JSON.
 type versionMismatchResp struct {
 	Version int32       `json:"version"`
 	Todos   [][2]string `json:"todos"`

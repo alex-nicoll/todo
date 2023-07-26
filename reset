@@ -4,9 +4,10 @@ DROP TABLE IF EXISTS todos;
 DROP TABLE IF EXISTS users;
 
 CREATE TABLE users (
-  id      uuid PRIMARY KEY,
-  name    varchar(30) UNIQUE NOT NULL,
-  version int NOT NULL CHECK (version >= 0)
+  id       uuid PRIMARY KEY,
+  name     varchar(30) UNIQUE NOT NULL,
+  password varchar(50) NOT NULL,
+  version  int NOT NULL CHECK (version >= 0)
 );
 
 CREATE TABLE todos (
@@ -17,8 +18,8 @@ CREATE TABLE todos (
 );
 
 -- Create the default user.
-INSERT INTO users (id, name, version) 
-  VALUES (gen_random_uuid(), 'default', 0);
+INSERT INTO users (id, name, password, version) 
+  VALUES (gen_random_uuid(), 'default', 'default', 0);
 
 -- Get the default user ID, and insert a new todo with that user ID.
 INSERT INTO todos (id, user_id, value)

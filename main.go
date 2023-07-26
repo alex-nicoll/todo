@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,6 +26,15 @@ func main() {
 	http.HandleFunc("/main.js", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "./main.js")
 	})
+
+	jwtSigningKeyBase64, ok := os.LookupEnv("JWT_SIGNING_KEY")
+	if !ok {
+		log.Fatal("JWT_SIGNING_KEY not set")
+	}
+	jwtSigningKey, err := base64.StdEncoding.DecodeString(jwtSigningKeyBase64)
+	if err != nil {
+		log.Fatal("Failed to decode signing key: %v", err)
+	}
 
 	dbUrl, ok := os.LookupEnv("DB_URL")
 	if !ok {
@@ -39,21 +50,22 @@ func main() {
 	// included in the client's request.
 	defaultUid, err := getValue[string](pool, "SELECT id FROM users WHERE name = 'default'")
 	if err != nil {
-		log.Println(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 	log.Println("default user ID:", defaultUid)
 
 	http.Handle("/api", &apiHandler{
-		pool:       pool,
-		defaultUid: defaultUid,
+		pool:          pool,
+		defaultUid:    defaultUid,
+		jwtSigningKey: jwtSigningKey,
 	})
-	http.ListenAndServe(":8080", nil)
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 type apiHandler struct {
-	pool       *pgxpool.Pool
-	defaultUid string
+	pool          *pgxpool.Pool
+	defaultUid    string
+	jwtSigningKey []byte
 }
 
 func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +77,11 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Println(err)
 			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		lr := &loginRqst{}
+		if err := json.Unmarshal(body, lr); err == nil && lr.Operation == "login" {
+			h.serveLogin(w, lr)
 			return
 		}
 		dr := &deleteRqst{}
@@ -85,6 +102,39 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("received unrecognized JSON: %s", body)
 		w.WriteHeader(http.StatusBadRequest)
 	}
+}
+
+func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
+	uid, pwd, err := getUidAndPwd(h.pool, r.Username)
+	if err == pgx.ErrNoRows {
+		writeJson(w, &loginFailureResp{})
+		return
+	}
+	if err != nil {
+		log.Printf("Failed to get UID and password for name \"%v\": %v", r.Username, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if r.Password != pwd {
+		writeJson(w, &loginFailureResp{})
+		return
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid})
+	signedString, err := token.SignedString(h.jwtSigningKey)
+	if err != nil {
+		log.Printf("Failed to sign jwt: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+	writeJson(w, &loginSuccessResp{Token: signedString})
+}
+
+// getUidAndPwd gets the user ID and password for the given user name.
+// It returns pgx.ErrNoRows if the user name doesn't exist.
+func getUidAndPwd(pool *pgxpool.Pool, name string) (uid string, pwd string, err error) {
+	query := "SELECT id, password FROM users WHERE name = $1"
+	row := pool.QueryRow(context.Background(), query, name)
+	err = row.Scan(&uid, &pwd)
+	return
 }
 
 func (h *apiHandler) serveGet(w http.ResponseWriter) {
