@@ -397,9 +397,10 @@ func appendTodo(tx pgx.Tx, uid string) string {
 // given user ID.
 // tx is the transaction in which to perform the associated UPDATE.
 // v is the current todo list version.
-// uid is the user ID
+// uid is the user ID.
 // incrementVersion returns the new v and a boolean indicating whether the
-// UPDATE command was successful.
+// UPDATE command was successful. If the UPDATE fails, incrementVersion logs
+// the error.
 func incrementVersion(tx pgx.Tx, v int32, uid string) (int32, bool) {
 	if v == math.MaxInt32 {
 		v = 0
@@ -421,6 +422,10 @@ func incrementVersion(tx pgx.Tx, v int32, uid string) (int32, bool) {
 	return v, true
 }
 
+// getTodos gets the todos associated with the given user ID as an Nx2 matrix,
+// where the first column is the ID and the second column is the value.
+// If there are no such todos, getTodos returns an empty matrix.
+// If an error occurs, getTodos logs the error and returns nil.
 func getTodos(tx pgx.Tx, uid string) [][2]string {
 	query := "SELECT id, value FROM todos WHERE user_id = $1 ORDER BY created"
 	rows, err := tx.Query(context.Background(), query, uid)
