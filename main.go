@@ -422,9 +422,10 @@ func incrementVersion(tx pgx.Tx, v int32, uid string) (int32, bool) {
 	return v, true
 }
 
-// getTodos gets the todos associated with the given user ID as an Nx2 matrix,
-// where the first column is the ID and the second column is the value.
-// If there are no such todos, getTodos returns an empty matrix.
+// getTodos gets the todos associated with the given user ID as a slice of
+// pairs, where the first element of each pair is the ID and the second element
+// is the value.
+// If there are no such todos, getTodos returns an empty slice.
 // If an error occurs, getTodos logs the error and returns nil.
 func getTodos(tx pgx.Tx, uid string) [][2]string {
 	query := "SELECT id, value FROM todos WHERE user_id = $1 ORDER BY created"
@@ -434,16 +435,15 @@ func getTodos(tx pgx.Tx, uid string) [][2]string {
 		log.Printf("Failed to get todos for UID \"%v\": %v", uid, err)
 		return nil
 	}
-	todos := [][2]string{}
-	for rows.Next() {
-		var id string
-		var value string
-		if err := rows.Scan(&id, &value); err != nil {
-			log.Printf("Failed to scan query result while getting todos for UID "+
-				"\"%v\": %v", query, err)
-			return nil
-		}
-		todos = append(todos, [2]string{id, value})
+	var id, value string
+	todos, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) ([2]string, error) {
+		err := row.Scan(&id, &value)
+		return [2]string{id, value}, err
+	})
+	if err != nil {
+		log.Printf("Failed to iterate over query result while getting todos "+
+			"for UID \"%v\": %v", uid, err)
+		return nil
 	}
 	return todos
 }
