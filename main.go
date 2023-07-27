@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"io"
 	"log"
 	"math"
@@ -48,7 +46,9 @@ func main() {
 
 	// In the future, the user ID should be read from an authorization token
 	// included in the client's request.
-	defaultUid, err := getValue[string](pool, "SELECT id FROM users WHERE name = 'default'")
+	row := pool.QueryRow(context.Background(), "SELECT id FROM users WHERE name = 'default'")
+	var defaultUid string
+	err = row.Scan(&defaultUid)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -421,13 +421,9 @@ func incrementVersion(tx pgx.Tx, v int32, uid string) (int32, bool) {
 	return v, true
 }
 
-type queriable interface {
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-}
-
-func getTodos(q queriable, uid string) [][2]string {
+func getTodos(tx pgx.Tx, uid string) [][2]string {
 	query := "SELECT id, value FROM todos WHERE user_id = $1 ORDER BY created"
-	rows, err := q.Query(context.Background(), query, uid)
+	rows, err := tx.Query(context.Background(), query, uid)
 	defer rows.Close()
 	if err != nil {
 		log.Printf("Failed to get todos for UID \"%v\": %v", uid, err)
@@ -447,33 +443,14 @@ func getTodos(q queriable, uid string) [][2]string {
 	return todos
 }
 
-// getValue executes a query where the result is a single row with a single
-// column.
-// args are additional arguments to pass to q.Query.
-// The first return value is the single value extracted from the query result.
-// If the query failed, getValue returns the zero value of V and a non-nil error.
-func getValue[V any](q queriable, query string, args ...any) (V, error) {
-	rows, err := q.Query(context.Background(), query, args...)
-	defer rows.Close()
-	var value V
-	if err != nil {
-		return value, fmt.Errorf("failed to execute query: %v", err)
-	}
-	if hasNext := rows.Next(); !hasNext {
-		return value, errors.New("no rows returned by query")
-	}
-	if err := rows.Scan(&value); err != nil {
-		return value, fmt.Errorf("failed to scan result of query: %v", err)
-	}
-	return value, nil
-}
-
 // getVersion gets the todo list version for the given user ID uid, returning
 // the version and a boolean indicating whether the operation was successful.
-func getVersion(q queriable, uid string) (int32, bool) {
-	v, err := getValue[int32](q, "SELECT version FROM users WHERE id = $1", uid)
+func getVersion(tx pgx.Tx, uid string) (int32, bool) {
+	row := tx.QueryRow(context.Background(), "SELECT version FROM users WHERE id = $1", uid)
+	var v int32
+	err := row.Scan(&v)
 	if err != nil {
-		log.Printf("Failed to get version for UID %v: %v", err)
+		log.Printf("Failed to get version for UID \"%v\": %v", uid, err)
 		return v, false
 	}
 	return v, true
