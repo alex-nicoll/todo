@@ -71,6 +71,7 @@ type apiHandler struct {
 func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		h.serveGet(w)
+		return
 	}
 	if r.Method == http.MethodPost {
 		body, err := io.ReadAll(r.Body)
@@ -99,9 +100,9 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.serveAppend(w, ar)
 			return
 		}
-		log.Printf("received unrecognized JSON: %s", body)
-		w.WriteHeader(http.StatusBadRequest)
+		log.Printf("received invalid or unrecognized JSON: %s", body)
 	}
+	w.WriteHeader(http.StatusBadRequest)
 }
 
 func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
