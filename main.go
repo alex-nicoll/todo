@@ -179,22 +179,15 @@ func (h *apiHandler) txGet() *getResp {
 }
 
 func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
-	resp := h.txMutate(r.Version, r.Key,
-		&deleteOperation{id: r.Key, uid: h.defaultUid})
-	if resp == "bad request" {
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
-	if resp == nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	writeJson(w, resp)
+	h.serveMutate(w, r.Version, r.Key, &deleteOperation{id: r.Key, uid: h.defaultUid})
 }
 
 func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
-	resp := h.txMutate(r.Version, r.Key,
-		&updateOperation{id: r.Key, uid: h.defaultUid, value: r.Value})
+	h.serveMutate(w, r.Version, r.Key, &updateOperation{id: r.Key, uid: h.defaultUid, value: r.Value})
+}
+
+func (h *apiHandler) serveMutate(w http.ResponseWriter, rqstVersion int32, rqstId string, op execOperation) {
+	resp := h.txMutate(rqstVersion, rqstId, op)
 	if resp == "bad request" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -292,8 +285,8 @@ func (h *apiHandler) txAppend(r *appendRqst) any {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
 	}
-	key := appendTodo(tx, h.defaultUid)
-	if key == "" {
+	id := appendTodo(tx, h.defaultUid)
+	if id == "" {
 		return nil
 	}
 	version, ok := getVersion(tx, h.defaultUid)
@@ -312,7 +305,7 @@ func (h *apiHandler) txAppend(r *appendRqst) any {
 		}
 		return &appendResp{
 			Version: newVersion,
-			Key:     key,
+			Key:     id,
 		}
 	}
 	log.Println("version mismatch")
@@ -356,6 +349,7 @@ func (u *updateOperation) run(tx pgx.Tx) (pgconn.CommandTag, error) {
 // mutateTodo attempts to mutate a todo (e.g. DELETE, UPDATE) by running op.
 // It returns "success" if the operation succeeded, "nonexistent" if the todo
 // doesn't exist, or "failure" if the operation failed for some other reason.
+// If the operation fails, mutateTodo logs the error.
 func mutateTodo(tx pgx.Tx, op execOperation, id string, uid string) string {
 	ct, err := op.run(tx)
 	if err != nil {
@@ -377,10 +371,13 @@ func mutateTodo(tx pgx.Tx, op execOperation, id string, uid string) string {
 	return "success"
 }
 
+// appendTodo creates a new todo for the given user ID.
+// It returns the ID of the todo.
+// If an error occurs, appendTodo logs the error and returns "".
 func appendTodo(tx pgx.Tx, uid string) string {
-	key := uuid.NewString()
+	id := uuid.NewString()
 	cmd := "INSERT INTO todos (id, user_id, value) VALUES ($1, $2, '')"
-	ct, err := tx.Exec(context.Background(), cmd, key, uid)
+	ct, err := tx.Exec(context.Background(), cmd, id, uid)
 	if err != nil {
 		log.Printf("Failed to append todo for UID %v: %v", uid, err)
 		return ""
@@ -391,7 +388,7 @@ func appendTodo(tx pgx.Tx, uid string) string {
 			"of rows affected (%v)", uid, rowsAffected)
 		return ""
 	}
-	return key
+	return id
 }
 
 // incrementVersion increments the todo list version for the user with the
@@ -451,6 +448,7 @@ func getTodos(tx pgx.Tx, uid string) [][2]string {
 
 // getVersion gets the todo list version for the given user ID uid, returning
 // the version and a boolean indicating whether the operation was successful.
+// If an error occurs, getVersion logs the error.
 func getVersion(tx pgx.Tx, uid string) (int32, bool) {
 	row := tx.QueryRow(context.Background(), "SELECT version FROM users WHERE id = $1", uid)
 	var v int32
