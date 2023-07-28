@@ -90,13 +90,13 @@ function TodoList({ todoStore }) {
     );
   } else {
     listItems = [];
-    state.forEach((value, key) => listItems.push(
-      <ListItem key={key}>
+    state.forEach((value, id) => listItems.push(
+      <ListItem key={id}>
         <TodoTextField
-          todoKey={key}
+          todoId={id}
           todoStore={todoStore}
         />
-        <IconButton onClick={() => todoStore.deleteTodo(key)}>
+        <IconButton onClick={() => todoStore.deleteTodo(id)}>
           <Clear />
         </IconButton>
       </ListItem>
@@ -118,12 +118,12 @@ function TodoList({ todoStore }) {
   );
 }
 
-function TodoTextField({ todoKey, todoStore }) {
+function TodoTextField({ todoId, todoStore }) {
   console.log("rendering TodoTextField");
 
   const [_, setState] = React.useState({});
   React.useEffect(
-    () => todoStore.textFieldDidMount(todoKey, () => setState({})),
+    () => todoStore.textFieldDidMount(todoId, () => setState({})),
     []
   );
 
@@ -134,8 +134,8 @@ function TodoTextField({ todoKey, todoStore }) {
       size="small"
       placeholder="Item"
       spellcheck="false"
-      value={todoStore.getState().get(todoKey)}
-      onChange={(e) => todoStore.updateTodo(todoKey, e.target.value)}
+      value={todoStore.getState().get(todoId)}
+      onChange={(e) => todoStore.updateTodo(todoId, e.target.value)}
     />
   );
 }

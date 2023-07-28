@@ -25,13 +25,13 @@ type getResp struct {
 type deleteRqst struct {
 	Operation string `json:"operation"`
 	Version   int32  `json:"version"`
-	Key       string `json:"key"`
+	Id        string `json:"id"`
 }
 
 type updateRqst struct {
 	Operation string `json:"operation"`
 	Version   int32  `json:"version"`
-	Key       string `json:"key"`
+	Id        string `json:"id"`
 	Value     string `json:"value"`
 }
 
@@ -54,5 +54,5 @@ type appendRqst struct {
 
 type appendResp struct {
 	Version int32  `json:"version"`
-	Key     string `json:"key"`
+	Id      string `json:"id"`
 }

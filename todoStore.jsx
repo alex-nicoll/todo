@@ -7,7 +7,7 @@
 // improves performance when typing.
 export function newTodoStore(apiURL, syncStore) {
 
-  // state is "loading", "error", or a map from todo key to todo value. 
+  // state is "loading", "error", or a map from todo ID to todo value. 
   let state = "loading";
 
   // version is the current todo list version.
@@ -18,7 +18,7 @@ export function newTodoStore(apiURL, syncStore) {
   // that each request contains the correct todo list version.
   let lastTask = Promise.resolve();
 
-  // todosUpdating is the set of todo keys for which there are pending update
+  // todosUpdating is the set of todo IDs for which there are pending update
   // operations.
   const todosUpdating = new Set();
 
@@ -32,7 +32,7 @@ export function newTodoStore(apiURL, syncStore) {
   //
   // The render function is called whenever the return value of getState()
   // changes. If getState() returns a map, the render function is called
-  // whenever the keys change.
+  // whenever the keys (todo IDs) change.
   //
   // listDidMount returns a function that should be called before the component
   // unmounts.
@@ -43,19 +43,19 @@ export function newTodoStore(apiURL, syncStore) {
   }
 
   // textFieldDidMount should be called when the component representing the
-  // text field of a particular todo mounts. It should be passed the todo key
+  // text field of a particular todo mounts. It should be passed the todo ID
   // and a function that forces the component to render.
   //
   // The render function is called whenever the associated todo value changes.
   //
   // textFieldDidMount returns a function that should be called before the
   // component unmounts.
-  function textFieldDidMount(key, render) {
-    mapRenderTextField.set(key, render);
-    return () => mapRenderTextField.delete(key);
+  function textFieldDidMount(id, render) {
+    mapRenderTextField.set(id, render);
+    return () => mapRenderTextField.delete(id);
   }
 
-  // getState returns "loading", "error", or a map from todo key to todo value. 
+  // getState returns "loading", "error", or a map from todo ID to todo value. 
   function getState() {
     return state;
   }
@@ -70,24 +70,24 @@ export function newTodoStore(apiURL, syncStore) {
     renderList();
   }
 
-  function deleteTodo(key) {
-    state.delete(key);
+  function deleteTodo(id) {
+    state.delete(id);
     renderList();
-    enqueue(() => post("delete", { key }));
+    enqueue(() => post("delete", { id }));
   }
 
-  async function updateTodo(key, value) {
-    state.set(key, value);
-    mapRenderTextField.get(key)();
-    if (todosUpdating.has(key)) {
+  async function updateTodo(id, value) {
+    state.set(id, value);
+    mapRenderTextField.get(id)();
+    if (todosUpdating.has(id)) {
       return;
     }
     syncStore.increment();
-    todosUpdating.add(key);
+    todosUpdating.add(id);
     // Wait for 2 seconds.
     await new Promise((resolve) => setTimeout(resolve, 2000));
-    todosUpdating.delete(key);
-    if (!state.has(key)) {
+    todosUpdating.delete(id);
+    if (!state.has(id)) {
       // todo was deleted while we were waiting.
       syncStore.decrement();
       return;
@@ -95,7 +95,7 @@ export function newTodoStore(apiURL, syncStore) {
     // Instead of using enqueue, update lastTask directly to avoid incrementing
     // and decrementing the sync count an additional time.
     lastTask = lastTask.then(
-      () => post("update", { key, value: state.get(key) })
+      () => post("update", { id, value: state.get(id) })
     );
     await lastTask;
     syncStore.decrement();
@@ -106,7 +106,7 @@ export function newTodoStore(apiURL, syncStore) {
     if (result === "done") {
       return;
     }
-    state.set(result.key, "");
+    state.set(result.id, "");
     renderList();
   }
 
@@ -193,8 +193,8 @@ export function newTodoStore(apiURL, syncStore) {
 
 function createTodosMap(todos) {
   const todosMap = new Map();
-  for (const [key, value] of todos) {
-    todosMap.set(key, value)
+  for (const [id, value] of todos) {
+    todosMap.set(id, value)
   }
   return todosMap;
 }

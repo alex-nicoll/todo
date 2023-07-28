@@ -179,11 +179,11 @@ func (h *apiHandler) txGet() *getResp {
 }
 
 func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
-	h.serveMutate(w, r.Version, r.Key, &deleteOperation{id: r.Key, uid: h.defaultUid})
+	h.serveMutate(w, r.Version, r.Id, &deleteOperation{id: r.Id, uid: h.defaultUid})
 }
 
 func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
-	h.serveMutate(w, r.Version, r.Key, &updateOperation{id: r.Key, uid: h.defaultUid, value: r.Value})
+	h.serveMutate(w, r.Version, r.Id, &updateOperation{id: r.Id, uid: h.defaultUid, value: r.Value})
 }
 
 func (h *apiHandler) serveMutate(w http.ResponseWriter, rqstVersion int32, rqstId string, op execOperation) {
@@ -305,7 +305,7 @@ func (h *apiHandler) txAppend(r *appendRqst) any {
 		}
 		return &appendResp{
 			Version: newVersion,
-			Key:     id,
+			Id:      id,
 		}
 	}
 	log.Println("version mismatch")
