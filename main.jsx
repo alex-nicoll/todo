@@ -2,6 +2,7 @@ import * as React from "react";
 import * as ReactDOM from "react-dom";
 import {
   Alert,
+  AppBar,
   Box,
   CircularProgress,
   Container,
@@ -25,23 +26,35 @@ function init() {
   const apiURL = `${document.location.origin}/api`;
   const syncStore = newSyncStore();
   const todoStore = newTodoStore(apiURL, syncStore);
+  const appBarHeight = "60px";
   const root = ReactDOM.createRoot(document.getElementById("root"));
   root.render(
-    <Container maxWidth="sm">
-      <Box
-        sx={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between"
-        }}
+    <Container maxWidth="sm" sx={{ paddingTop: appBarHeight }}>
+      <AppBar
+          sx={{
+            height: appBarHeight,
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            padding: "0 5%"
+          }}
       >
-        <Typography variant="h3" component="h1">
-          To-Do
-        </Typography>
-        <Typography>
-          <SyncIndicator syncStore={syncStore} />
-        </Typography>
-      </Box>
+        <Box sx={{ flex: "1", display: "flex", justifyContent: "left" }}>
+          <Typography variant="h4" component="h1">
+            To-Do
+          </Typography>
+        </Box>
+        <Box sx={{ flex: "1", display: "flex", justifyContent: "center" }}>
+          <Typography>
+            <SyncIndicator syncStore={syncStore} />
+          </Typography>
+        </Box>
+        <Box sx={{ flex: "1", display: "flex", justifyContent: "right" }}>
+          <Typography>
+            Logout
+          </Typography>
+        </Box>
+      </AppBar>
       <TodoList todoStore={todoStore} />
     </Container>
   );
