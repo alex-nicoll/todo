@@ -15,6 +15,8 @@ import {
   TextField,
   Typography
 } from "@mui/material";
+import { indigo, cyan } from '@mui/material/colors';
+import { createTheme, ThemeProvider } from "@mui/material/styles";
 import Add from "@mui/icons-material/Add";
 import Clear from "@mui/icons-material/Clear";
 import { newTodoStore } from "./todoStore.jsx";
@@ -26,37 +28,45 @@ function init() {
   const apiURL = `${document.location.origin}/api`;
   const syncStore = newSyncStore();
   const todoStore = newTodoStore(apiURL, syncStore);
+  const theme = createTheme({
+    palette: {
+      primary: indigo,
+      secondary: cyan
+    }
+  });
   const appBarHeight = "60px";
   const root = ReactDOM.createRoot(document.getElementById("root"));
   root.render(
-    <Container maxWidth="sm" sx={{ paddingTop: appBarHeight }}>
-      <AppBar
-          sx={{
-            height: appBarHeight,
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            padding: "0 5%"
-          }}
-      >
-        <Box sx={{ flex: "1", display: "flex", justifyContent: "left" }}>
-          <Typography variant="h4" component="h1">
-            To-Do
-          </Typography>
-        </Box>
-        <Box sx={{ flex: "1", display: "flex", justifyContent: "center" }}>
-          <Typography>
-            <SyncIndicator syncStore={syncStore} />
-          </Typography>
-        </Box>
-        <Box sx={{ flex: "1", display: "flex", justifyContent: "right" }}>
-          <Typography>
-            Logout
-          </Typography>
-        </Box>
-      </AppBar>
-      <TodoList todoStore={todoStore} />
-    </Container>
+    <ThemeProvider theme={theme}>
+      <Container maxWidth="sm" sx={{ paddingTop: appBarHeight }}>
+        <AppBar
+            sx={{
+              height: appBarHeight,
+              display: "flex",
+              flexDirection: "row",
+              alignItems: "center",
+              padding: "0 5%"
+            }}
+        >
+          <Box sx={{ flex: "1", display: "flex", justifyContent: "left" }}>
+            <Typography variant="h4" component="h1">
+              To-Do
+            </Typography>
+          </Box>
+          <Box sx={{ flex: "1", display: "flex", justifyContent: "center" }}>
+            <Typography>
+              <SyncIndicator syncStore={syncStore} />
+            </Typography>
+          </Box>
+          <Box sx={{ flex: "1", display: "flex", justifyContent: "right" }}>
+            <Typography>
+              Logout
+            </Typography>
+          </Box>
+        </AppBar>
+        <TodoList todoStore={todoStore} />
+      </Container>
+    </ThemeProvider>
   );
 }
 
