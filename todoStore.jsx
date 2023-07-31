@@ -1,3 +1,5 @@
+import { fetchObject, newPost } from "./fetchUtil.js";
+
 // TodoStore contains the state of the todo list along with methods for
 // changing the list and replicating those changes to the server.
 //
@@ -5,7 +7,7 @@
 // each todo render independently. I.e., when the user types, only the text
 // field that they are typing into renders - not the entire todo list. This
 // improves performance when typing.
-export function newTodoStore(apiURL, syncStore) {
+export function newTodoStore(apiUrl, syncStore) {
 
   // state is "loading", "error", or a map from todo ID to todo value. 
   let state = "loading";
@@ -61,8 +63,10 @@ export function newTodoStore(apiURL, syncStore) {
   }
 
   async function initTodos() {
-    const result = await fetchObject({ method: "GET" });
+    const result = await fetchObject(apiUrl, { method: "GET" });
     if (result === "failed") {
+      state = "error";
+      renderList();
       return;
     }
     version = result.version;
@@ -120,39 +124,6 @@ export function newTodoStore(apiURL, syncStore) {
     return result;
   }
 
-  // fetchObject calls fetch with apiUrl and the given options, checks the
-  // status code, and parses the response body as JSON. If an error is
-  // encountered, fetchObject sets state to "error" and returns "failed".
-  // Otherwise, it returns the parsed response body.
-  async function fetchObject(options) {
-    console.log(options);
-    let resp;
-    try {
-      resp = await fetch(apiURL, options);
-    } catch (e) {
-      console.error(e);
-      state = "error";
-      renderList();
-      return "failed";
-    }
-    if (resp.status !== 200) {
-      state = "error";
-      renderList();
-      return "failed";
-    }
-    let v;
-    try {
-      v = await resp.json();
-    } catch (e) {
-      console.error(e)
-      state = "error";
-      renderList();
-      return "failed";
-    }
-    console.log(v);
-    return v;
-  }
-
   // post sends a POST request and partially handles the response. post
   // includes the current todo list version in the request, and updates the
   // current version to match the version in the response.
@@ -165,11 +136,13 @@ export function newTodoStore(apiURL, syncStore) {
   //
   // Otherwise, it returns the response body parsed as JSON.
   async function post(operation, args) {
-    const result = await fetchObject({
-      method: "POST",
-      body: JSON.stringify({ operation, version, ...args })
-    });
+    const result = await fetchObject(
+      apiUrl,
+      newPost(operation, { version, ...args })
+    );
     if (result === "failed") {
+      state = "error";
+      renderList();
       return "done";
     }
     version = result.version;
