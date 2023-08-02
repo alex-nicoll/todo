@@ -24,8 +24,8 @@ import Add from "@mui/icons-material/Add";
 import Clear from "@mui/icons-material/Clear";
 import Logout from "@mui/icons-material/Logout";
 import { fetchObject, newPost } from "./fetchUtil.js";
-import { newTodoStore } from "./todoStore.jsx";
-import { newSyncStore } from "./syncStore.jsx";
+import { newTodoStore } from "./todoStore.js";
+import { newSyncStore } from "./syncStore.js";
 
 init();
 

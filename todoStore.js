@@ -70,7 +70,7 @@ export function newTodoStore(apiUrl, syncStore) {
       return;
     }
     version = result.version;
-    state = createTodosMap(result.todos);
+    state = newTodosMap(result.todos);
     renderList();
   }
 
@@ -147,7 +147,7 @@ export function newTodoStore(apiUrl, syncStore) {
     }
     version = result.version;
     if (result.todos !== undefined) {
-      state = createTodosMap(result.todos);
+      state = newTodosMap(result.todos);
       renderList();
       return "done";
     }
@@ -164,7 +164,7 @@ export function newTodoStore(apiUrl, syncStore) {
   };
 }
 
-function createTodosMap(todos) {
+function newTodosMap(todos) {
   const todosMap = new Map();
   for (const [id, value] of todos) {
     todosMap.set(id, value)

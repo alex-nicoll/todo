@@ -1,5 +1,5 @@
 {
-  "name": "kube-todo",
+  "name": "todo",
   "version": "1.0.0",
   "dependencies": {
     "@emotion/react": "11.10.6",
