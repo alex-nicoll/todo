@@ -108,7 +108,7 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
 	uid, pwd, err := getUidAndPwd(h.pool, r.Username)
 	if err == pgx.ErrNoRows {
-		writeJson(w, &loginFailureResp{})
+		writeJson(w, &loginResp{DidLogin: false})
 		return
 	}
 	if err != nil {
@@ -117,7 +117,7 @@ func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
 		return
 	}
 	if r.Password != pwd {
-		writeJson(w, &loginFailureResp{})
+		writeJson(w, &loginResp{DidLogin: false})
 		return
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid})
@@ -126,11 +126,17 @@ func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
 		log.Printf("Failed to sign jwt: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	writeJson(w, &loginSuccessResp{Token: signedString})
+	http.SetCookie(w, &http.Cookie{
+		Name:     "accessToken",
+		Value:    signedString,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	writeJson(w, &loginResp{DidLogin: true})
 }
 
-// getUidAndPwd gets the user ID and password for the given user name.
-// It returns pgx.ErrNoRows if the user name doesn't exist.
+// getUidAndPwd gets the user ID and password for the given user name, or
+// returns an error. It returns pgx.ErrNoRows if the user name doesn't exist.
 func getUidAndPwd(pool *pgxpool.Pool, name string) (uid string, pwd string, err error) {
 	query := "SELECT id, password FROM users WHERE name = $1"
 	row := pool.QueryRow(context.Background(), query, name)

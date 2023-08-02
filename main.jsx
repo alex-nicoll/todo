@@ -122,7 +122,8 @@ function LoginForm({ apiUrl, onLoggedIn }) {
       setState("error");
       return;
     }
-    if (result.token === undefined) {
+    if (result.didLogin === false) {
+      // The operation succeeded but the user's credentials were rejected.
       setState({ ...state, isInvalid: true });
       return;
     }

@@ -10,12 +10,9 @@ type loginRqst struct {
 	Password  string `json:"password"`
 }
 
-type loginSuccessResp struct {
-	Token string `json:"token"`
+type loginResp struct {
+	DidLogin bool `json:"didLogin"`
 }
-
-// Login failure is indicated by an empty object ({}).
-type loginFailureResp struct{}
 
 type getResp struct {
 	Version int32       `json:"version"`
@@ -39,14 +36,6 @@ type mutateResp struct {
 	Version int32 `json:"version"`
 }
 
-// The client can differentiate between a successful mutate response and a
-// version mismatch response by checking for the existence of "todos" in the
-// response JSON.
-type versionMismatchResp struct {
-	Version int32       `json:"version"`
-	Todos   [][2]string `json:"todos"`
-}
-
 type appendRqst struct {
 	Operation string `json:"operation"`
 	Version   int32  `json:"version"`
@@ -55,4 +44,12 @@ type appendRqst struct {
 type appendResp struct {
 	Version int32  `json:"version"`
 	Id      string `json:"id"`
+}
+
+// The client can differentiate between a normal mutate/append response and a
+// version mismatch response by checking for the existence of "todos" in the
+// response JSON.
+type versionMismatchResp struct {
+	Version int32       `json:"version"`
+	Todos   [][2]string `json:"todos"`
 }
