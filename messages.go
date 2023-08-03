@@ -14,34 +14,38 @@ type loginResp struct {
 	DidLogin bool `json:"didLogin"`
 }
 
-type getResp struct {
+type getTodosRqst struct {
+	Operation string `json:"operation"`
+}
+
+type getTodosResp struct {
 	Version int32       `json:"version"`
 	Todos   [][2]string `json:"todos"`
 }
 
-type deleteRqst struct {
+type deleteTodoRqst struct {
 	Operation string `json:"operation"`
 	Version   int32  `json:"version"`
 	Id        string `json:"id"`
 }
 
-type updateRqst struct {
+type updateTodoRqst struct {
 	Operation string `json:"operation"`
 	Version   int32  `json:"version"`
 	Id        string `json:"id"`
 	Value     string `json:"value"`
 }
 
-type mutateResp struct {
+type mutateTodoResp struct {
 	Version int32 `json:"version"`
 }
 
-type appendRqst struct {
+type appendTodoRqst struct {
 	Operation string `json:"operation"`
 	Version   int32  `json:"version"`
 }
 
-type appendResp struct {
+type appendTodoResp struct {
 	Version int32  `json:"version"`
 	Id      string `json:"id"`
 }

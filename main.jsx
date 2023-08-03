@@ -23,7 +23,7 @@ import { createTheme, ThemeProvider } from "@mui/material/styles";
 import Add from "@mui/icons-material/Add";
 import Clear from "@mui/icons-material/Clear";
 import Logout from "@mui/icons-material/Logout";
-import { fetchObject, newPost } from "./fetchUtil.js";
+import { callApi } from "./api.js";
 import { newTodoStore } from "./todoStore.js";
 import { newSyncStore } from "./syncStore.js";
 
@@ -114,10 +114,7 @@ function LoginForm({ apiUrl, onLoggedIn }) {
   async function login() {
     setState({ ...state, isLoggingIn: true });
     const { username, password } = state;
-    const result = await fetchObject(
-      apiUrl,
-      newPost("login", { username, password })
-    );
+    const result = await callApi(apiUrl, "login", { username, password });
     if (result === "failed") {
       setState("error");
       return;

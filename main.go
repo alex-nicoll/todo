@@ -69,39 +69,41 @@ type apiHandler struct {
 }
 
 func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		h.serveGet(w)
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
-	if r.Method == http.MethodPost {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			log.Println(err)
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		lr := &loginRqst{}
-		if err := json.Unmarshal(body, lr); err == nil && lr.Operation == "login" {
-			h.serveLogin(w, lr)
-			return
-		}
-		dr := &deleteRqst{}
-		if err := json.Unmarshal(body, dr); err == nil && dr.Operation == "delete" {
-			h.serveDelete(w, dr)
-			return
-		}
-		ur := &updateRqst{}
-		if err := json.Unmarshal(body, ur); err == nil && ur.Operation == "update" {
-			h.serveUpdate(w, ur)
-			return
-		}
-		ar := &appendRqst{}
-		if err := json.Unmarshal(body, ar); err == nil && ar.Operation == "append" {
-			h.serveAppend(w, ar)
-			return
-		}
-		log.Printf("received invalid or unrecognized JSON: %s", body)
+	lr := &loginRqst{}
+	if err := json.Unmarshal(body, lr); err == nil && lr.Operation == "login" {
+		h.serveLogin(w, lr)
+		return
 	}
+	gtr := &getTodosRqst{}
+	if err := json.Unmarshal(body, gtr); err == nil && gtr.Operation == "getTodos" {
+		h.serveGetTodos(w)
+		return
+	}
+	dtr := &deleteTodoRqst{}
+	if err := json.Unmarshal(body, dtr); err == nil && dtr.Operation == "deleteTodo" {
+		h.serveDeleteTodo(w, dtr)
+		return
+	}
+	utr := &updateTodoRqst{}
+	if err := json.Unmarshal(body, utr); err == nil && utr.Operation == "updateTodo" {
+		h.serveUpdateTodo(w, utr)
+		return
+	}
+	atr := &appendTodoRqst{}
+	if err := json.Unmarshal(body, atr); err == nil && atr.Operation == "appendTodo" {
+		h.serveAppendTodo(w, atr)
+		return
+	}
+	log.Printf("received invalid or unrecognized JSON: %s", body)
 	w.WriteHeader(http.StatusBadRequest)
 }
 
@@ -144,8 +146,8 @@ func getUidAndPwd(pool *pgxpool.Pool, name string) (uid string, pwd string, err 
 	return
 }
 
-func (h *apiHandler) serveGet(w http.ResponseWriter) {
-	resp := h.txGet()
+func (h *apiHandler) serveGetTodos(w http.ResponseWriter) {
+	resp := h.txGetTodos()
 	if resp == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -153,7 +155,7 @@ func (h *apiHandler) serveGet(w http.ResponseWriter) {
 	writeJson(w, resp)
 }
 
-func (h *apiHandler) txGet() *getResp {
+func (h *apiHandler) txGetTodos() *getTodosResp {
 	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
 		IsoLevel:       pgx.Serializable,
 		AccessMode:     pgx.ReadOnly,
@@ -178,22 +180,22 @@ func (h *apiHandler) txGet() *getResp {
 		log.Printf("Failed to commit transaction: %v", err)
 		return nil
 	}
-	return &getResp{
+	return &getTodosResp{
 		Version: version,
 		Todos:   todos,
 	}
 }
 
-func (h *apiHandler) serveDelete(w http.ResponseWriter, r *deleteRqst) {
-	h.serveMutate(w, r.Version, r.Id, &deleteOperation{id: r.Id, uid: h.defaultUid})
+func (h *apiHandler) serveDeleteTodo(w http.ResponseWriter, r *deleteTodoRqst) {
+	h.serveMutateTodo(w, r.Version, r.Id, &deleteOperation{id: r.Id, uid: h.defaultUid})
 }
 
-func (h *apiHandler) serveUpdate(w http.ResponseWriter, r *updateRqst) {
-	h.serveMutate(w, r.Version, r.Id, &updateOperation{id: r.Id, uid: h.defaultUid, value: r.Value})
+func (h *apiHandler) serveUpdateTodo(w http.ResponseWriter, r *updateTodoRqst) {
+	h.serveMutateTodo(w, r.Version, r.Id, &updateOperation{id: r.Id, uid: h.defaultUid, value: r.Value})
 }
 
-func (h *apiHandler) serveMutate(w http.ResponseWriter, rqstVersion int32, rqstId string, op execOperation) {
-	resp := h.txMutate(rqstVersion, rqstId, op)
+func (h *apiHandler) serveMutateTodo(w http.ResponseWriter, rqstVersion int32, rqstId string, op execOperation) {
+	resp := h.txMutateTodo(rqstVersion, rqstId, op)
 	if resp == "bad request" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -210,13 +212,13 @@ type execOperation interface {
 	run(tx pgx.Tx) (pgconn.CommandTag, error)
 }
 
-// txMutate runs a transaction that mutates a particular todo. rqstVersion and
+// txMutateTodo runs a transaction that mutates a particular todo. rqstVersion and
 // rqstId are the todo list version and todo ID in the request that initiated
 // the transaction. op is the operation (e.g. UPDATE, DELETE) to perform.
-// txMutate returns a response struct if the transaction was successful, "bad
+// txMutateTodo returns a response struct if the transaction was successful, "bad
 // request" if the transaction failed due to a problem with the request, or nil
 // if the transaction failed for some other reason.
-func (h *apiHandler) txMutate(rqstVersion int32, rqstId string, op execOperation) any {
+func (h *apiHandler) txMutateTodo(rqstVersion int32, rqstId string, op execOperation) any {
 	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
 		IsoLevel:       pgx.Serializable,
 		AccessMode:     pgx.ReadWrite,
@@ -264,11 +266,11 @@ func (h *apiHandler) txMutate(rqstVersion int32, rqstId string, op execOperation
 		log.Printf("Failed to commit transaction: %v", err)
 		return nil
 	}
-	return &mutateResp{Version: newVersion}
+	return &mutateTodoResp{Version: newVersion}
 }
 
-func (h *apiHandler) serveAppend(w http.ResponseWriter, r *appendRqst) {
-	resp := h.txAppend(r)
+func (h *apiHandler) serveAppendTodo(w http.ResponseWriter, r *appendTodoRqst) {
+	resp := h.txAppendTodo(r)
 	if resp == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -276,7 +278,7 @@ func (h *apiHandler) serveAppend(w http.ResponseWriter, r *appendRqst) {
 	writeJson(w, resp)
 }
 
-func (h *apiHandler) txAppend(r *appendRqst) any {
+func (h *apiHandler) txAppendTodo(r *appendTodoRqst) any {
 	// Note that we carry out the append operation even if the client's version
 	// doesn't match. This is considered safe; there is no way for an append to
 	// result in data loss, even if the client has a stale view.
@@ -309,7 +311,7 @@ func (h *apiHandler) txAppend(r *appendRqst) any {
 			log.Printf("Failed to commit transaction: %v", err)
 			return nil
 		}
-		return &appendResp{
+		return &appendTodoResp{
 			Version: newVersion,
 			Id:      id,
 		}

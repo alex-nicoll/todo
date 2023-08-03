@@ -1,4 +1,4 @@
-import { fetchObject, newPost } from "./fetchUtil.js";
+import { callApi } from "./api.js";
 
 // TodoStore contains the state of the todo list along with methods for
 // changing the list and replicating those changes to the server.
@@ -63,7 +63,7 @@ export function newTodoStore(apiUrl, syncStore) {
   }
 
   async function initTodos() {
-    const result = await fetchObject(apiUrl, { method: "GET" });
+    const result = await callApi(apiUrl, "getTodos");
     if (result === "failed") {
       state = "error";
       renderList();
@@ -77,7 +77,7 @@ export function newTodoStore(apiUrl, syncStore) {
   function deleteTodo(id) {
     state.delete(id);
     renderList();
-    enqueue(() => post("delete", { id }));
+    enqueue(() => callApiWithVersion("deleteTodo", { id }));
   }
 
   async function updateTodo(id, value) {
@@ -99,14 +99,14 @@ export function newTodoStore(apiUrl, syncStore) {
     // Instead of using enqueue, update lastTask directly to avoid incrementing
     // and decrementing the sync count an additional time.
     lastTask = lastTask.then(
-      () => post("update", { id, value: state.get(id) })
+      () => callApiWithVersion("updateTodo", { id, value: state.get(id) })
     );
     await lastTask;
     syncStore.decrement();
   }
 
   async function appendTodo() {
-    const result = await enqueue(() => post("append"));
+    const result = await enqueue(() => callApiWithVersion("appendTodo"));
     if (result === "done") {
       return;
     }
@@ -124,7 +124,7 @@ export function newTodoStore(apiUrl, syncStore) {
     return result;
   }
 
-  // post sends a POST request and partially handles the response. post
+  // callApiWithVersion calls the API and partially handles the response. It
   // includes the current todo list version in the request, and updates the
   // current version to match the version in the response.
   //
@@ -135,11 +135,8 @@ export function newTodoStore(apiUrl, syncStore) {
   // state updates to perform and the caller can safely return.
   //
   // Otherwise, it returns the response body parsed as JSON.
-  async function post(operation, args) {
-    const result = await fetchObject(
-      apiUrl,
-      newPost(operation, { version, ...args })
-    );
+  async function callApiWithVersion(operation, args) {
+    const result = await callApi(apiUrl, operation, { version, ...args });
     if (result === "failed") {
       state = "error";
       renderList();
