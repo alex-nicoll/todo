@@ -44,28 +44,18 @@ func main() {
 		log.Fatalf("Failed to create database connection pool: %v\n", err)
 	}
 
-	// In the future, the user ID should be read from an authorization token
-	// included in the client's request.
-	row := pool.QueryRow(context.Background(), "SELECT id FROM users WHERE name = 'default'")
-	var defaultUid string
-	err = row.Scan(&defaultUid)
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Println("default user ID:", defaultUid)
-
 	http.Handle("/api", &apiHandler{
 		pool:          pool,
-		defaultUid:    defaultUid,
 		jwtSigningKey: jwtSigningKey,
+		cookieName:    "accessToken",
 	})
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 type apiHandler struct {
 	pool          *pgxpool.Pool
-	defaultUid    string
 	jwtSigningKey []byte
+	cookieName    string
 }
 
 func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -85,26 +75,82 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	gtr := &getTodosRqst{}
 	if err := json.Unmarshal(body, gtr); err == nil && gtr.Operation == "getTodos" {
-		h.serveGetTodos(w)
+		withVerifyCookie(func(uid string) { h.serveGetTodos(w, uid) })(h, w, r)
 		return
 	}
 	dtr := &deleteTodoRqst{}
 	if err := json.Unmarshal(body, dtr); err == nil && dtr.Operation == "deleteTodo" {
-		h.serveDeleteTodo(w, dtr)
+		withVerifyCookie(func(uid string) { h.serveDeleteTodo(w, dtr, uid) })(h, w, r)
 		return
 	}
 	utr := &updateTodoRqst{}
 	if err := json.Unmarshal(body, utr); err == nil && utr.Operation == "updateTodo" {
-		h.serveUpdateTodo(w, utr)
+		withVerifyCookie(func(uid string) { h.serveUpdateTodo(w, utr, uid) })(h, w, r)
 		return
 	}
 	atr := &appendTodoRqst{}
 	if err := json.Unmarshal(body, atr); err == nil && atr.Operation == "appendTodo" {
-		h.serveAppendTodo(w, atr)
+		withVerifyCookie(func(uid string) { h.serveAppendTodo(w, atr, uid) })(h, w, r)
 		return
 	}
 	log.Printf("received invalid or unrecognized JSON: %s", body)
 	w.WriteHeader(http.StatusBadRequest)
+}
+
+// verifyCookie verifies the signature of the access token stored in the given
+// request's cookie, and then retrieves the user ID from said access token.
+// If an error occurs, verifyCookie logs the error, writes an appropriate
+// response header, and returns the empty string.
+//
+// If the cookie doesn't exist, then http.StatusBadRequest is sent, because the
+// client might be trying to perform an operation that it is not authorized
+// for; i.e., there may be a programming error on the client. Though there may
+// be other causes of this scenario, we don't want to hide a potential
+// programming error.
+//
+// If the cookie exists but the access token can't be verified, then
+// the cookie is deleted and http.StatusInternalServerError is sent. Since the
+// server is responsible for generating the token in the first place, a
+// potential server programming error is indicated. Again, there could be
+// another cause (like a forgery attempt), but we don't want to hide a
+// programming error.
+func (h *apiHandler) verifyCookie(w http.ResponseWriter, r *http.Request) string {
+	c, err := r.Cookie(h.cookieName)
+	if err != nil {
+		log.Println(err)
+		w.WriteHeader(http.StatusBadRequest)
+		return ""
+	}
+	token, err := jwt.Parse(
+		c.Value,
+		func(t *jwt.Token) (interface{}, error) {
+			return h.jwtSigningKey, nil
+		},
+		jwt.WithValidMethods([]string{"HS256"}),
+	)
+	if err != nil {
+		log.Println(err)
+		http.SetCookie(w, &http.Cookie{
+			Name:   h.cookieName,
+			MaxAge: -1,
+		})
+		w.WriteHeader(http.StatusInternalServerError)
+		return ""
+	}
+	claims := token.Claims.(jwt.MapClaims)
+	return claims["uid"].(string)
+}
+
+// withVerifyCookie returns a new function that:
+// 1. Calls verifyCookie, and then
+// 2. If verifyCookie succeeds (returns a user ID), calls the given callback.
+func withVerifyCookie(f func(string)) func(*apiHandler, http.ResponseWriter, *http.Request) {
+	return func(h *apiHandler, w http.ResponseWriter, r *http.Request) {
+		uid := h.verifyCookie(w, r)
+		if uid != "" {
+			f(uid)
+		}
+	}
 }
 
 func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
@@ -129,7 +175,7 @@ func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     "accessToken",
+		Name:     h.cookieName,
 		Value:    signedString,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
@@ -146,8 +192,8 @@ func getUidAndPwd(pool *pgxpool.Pool, name string) (uid string, pwd string, err 
 	return
 }
 
-func (h *apiHandler) serveGetTodos(w http.ResponseWriter) {
-	resp := h.txGetTodos()
+func (h *apiHandler) serveGetTodos(w http.ResponseWriter, uid string) {
+	resp := h.txGetTodos(uid)
 	if resp == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -155,7 +201,7 @@ func (h *apiHandler) serveGetTodos(w http.ResponseWriter) {
 	writeJson(w, resp)
 }
 
-func (h *apiHandler) txGetTodos() *getTodosResp {
+func (h *apiHandler) txGetTodos(uid string) *getTodosResp {
 	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
 		IsoLevel:       pgx.Serializable,
 		AccessMode:     pgx.ReadOnly,
@@ -167,11 +213,11 @@ func (h *apiHandler) txGetTodos() *getTodosResp {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
 	}
-	version, ok := getVersion(tx, h.defaultUid)
+	version, ok := getVersion(tx, uid)
 	if !ok {
 		return nil
 	}
-	todos := getTodos(tx, h.defaultUid)
+	todos := getTodos(tx, uid)
 	if todos == nil {
 		return nil
 	}
@@ -186,16 +232,16 @@ func (h *apiHandler) txGetTodos() *getTodosResp {
 	}
 }
 
-func (h *apiHandler) serveDeleteTodo(w http.ResponseWriter, r *deleteTodoRqst) {
-	h.serveMutateTodo(w, r.Version, r.Id, &deleteOperation{id: r.Id, uid: h.defaultUid})
+func (h *apiHandler) serveDeleteTodo(w http.ResponseWriter, r *deleteTodoRqst, uid string) {
+	h.serveMutateTodo(w, r.Version, r.Id, uid, &deleteOperation{id: r.Id, uid: uid})
 }
 
-func (h *apiHandler) serveUpdateTodo(w http.ResponseWriter, r *updateTodoRqst) {
-	h.serveMutateTodo(w, r.Version, r.Id, &updateOperation{id: r.Id, uid: h.defaultUid, value: r.Value})
+func (h *apiHandler) serveUpdateTodo(w http.ResponseWriter, r *updateTodoRqst, uid string) {
+	h.serveMutateTodo(w, r.Version, r.Id, uid, &updateOperation{id: r.Id, uid: uid, value: r.Value})
 }
 
-func (h *apiHandler) serveMutateTodo(w http.ResponseWriter, rqstVersion int32, rqstId string, op execOperation) {
-	resp := h.txMutateTodo(rqstVersion, rqstId, op)
+func (h *apiHandler) serveMutateTodo(w http.ResponseWriter, rqstVersion int32, rqstId string, uid string, op execOperation) {
+	resp := h.txMutateTodo(rqstVersion, rqstId, uid, op)
 	if resp == "bad request" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -218,7 +264,7 @@ type execOperation interface {
 // txMutateTodo returns a response struct if the transaction was successful, "bad
 // request" if the transaction failed due to a problem with the request, or nil
 // if the transaction failed for some other reason.
-func (h *apiHandler) txMutateTodo(rqstVersion int32, rqstId string, op execOperation) any {
+func (h *apiHandler) txMutateTodo(rqstVersion int32, rqstId string, uid string, op execOperation) any {
 	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
 		IsoLevel:       pgx.Serializable,
 		AccessMode:     pgx.ReadWrite,
@@ -230,13 +276,13 @@ func (h *apiHandler) txMutateTodo(rqstVersion int32, rqstId string, op execOpera
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
 	}
-	version, ok := getVersion(tx, h.defaultUid)
+	version, ok := getVersion(tx, uid)
 	if !ok {
 		return nil
 	}
 	if rqstVersion != version {
 		log.Println("version mismatch")
-		todos := getTodos(tx, h.defaultUid)
+		todos := getTodos(tx, uid)
 		if todos == nil {
 			return nil
 		}
@@ -250,14 +296,14 @@ func (h *apiHandler) txMutateTodo(rqstVersion int32, rqstId string, op execOpera
 			Todos:   todos,
 		}
 	}
-	mutateResult := mutateTodo(tx, op, rqstId, h.defaultUid)
+	mutateResult := mutateTodo(tx, op, rqstId, uid)
 	if mutateResult == "failed" {
 		return nil
 	}
 	if mutateResult == "nonexistent" {
 		return "bad request"
 	}
-	newVersion, ok := incrementVersion(tx, version, h.defaultUid)
+	newVersion, ok := incrementVersion(tx, version, uid)
 	if !ok {
 		return nil
 	}
@@ -269,8 +315,8 @@ func (h *apiHandler) txMutateTodo(rqstVersion int32, rqstId string, op execOpera
 	return &mutateTodoResp{Version: newVersion}
 }
 
-func (h *apiHandler) serveAppendTodo(w http.ResponseWriter, r *appendTodoRqst) {
-	resp := h.txAppendTodo(r)
+func (h *apiHandler) serveAppendTodo(w http.ResponseWriter, r *appendTodoRqst, uid string) {
+	resp := h.txAppendTodo(r, uid)
 	if resp == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -278,7 +324,7 @@ func (h *apiHandler) serveAppendTodo(w http.ResponseWriter, r *appendTodoRqst) {
 	writeJson(w, resp)
 }
 
-func (h *apiHandler) txAppendTodo(r *appendTodoRqst) any {
+func (h *apiHandler) txAppendTodo(r *appendTodoRqst, uid string) any {
 	// Note that we carry out the append operation even if the client's version
 	// doesn't match. This is considered safe; there is no way for an append to
 	// result in data loss, even if the client has a stale view.
@@ -293,15 +339,15 @@ func (h *apiHandler) txAppendTodo(r *appendTodoRqst) any {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
 	}
-	id := appendTodo(tx, h.defaultUid)
+	id := appendTodo(tx, uid)
 	if id == "" {
 		return nil
 	}
-	version, ok := getVersion(tx, h.defaultUid)
+	version, ok := getVersion(tx, uid)
 	if !ok {
 		return nil
 	}
-	newVersion, ok := incrementVersion(tx, version, h.defaultUid)
+	newVersion, ok := incrementVersion(tx, version, uid)
 	if !ok {
 		return nil
 	}
@@ -317,7 +363,7 @@ func (h *apiHandler) txAppendTodo(r *appendTodoRqst) any {
 		}
 	}
 	log.Println("version mismatch")
-	todos := getTodos(tx, h.defaultUid)
+	todos := getTodos(tx, uid)
 	if todos == nil {
 		return nil
 	}
