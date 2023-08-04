@@ -1,4 +1,4 @@
-module github.com/alex-nicoll/kube-todo
+module github.com/alex-nicoll/todo
 
 go 1.20
 

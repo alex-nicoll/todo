@@ -78,6 +78,11 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeDeleteCookie(w, h.cookieName)
 		return
 	}
+	gur := &getUsernameRqst{}
+	if err := json.Unmarshal(body, gur); err == nil && gur.Operation == "getUsername" {
+		h.serveGetUsername(w, r)
+		return
+	}
 	gtr := &getTodosRqst{}
 	if err := json.Unmarshal(body, gtr); err == nil && gtr.Operation == "getTodos" {
 		withVerifyCookie(func(uid string) { h.serveGetTodos(w, uid) })(h, w, r)
@@ -105,7 +110,7 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // verifyCookie verifies the signature of the access token stored in the given
 // request's cookie, and then retrieves the user ID from said access token.
 // If an error occurs, verifyCookie logs the error, writes an appropriate
-// response header, and returns the empty string.
+// response header, and returns "".
 //
 // If the cookie doesn't exist, then http.StatusBadRequest is sent, because the
 // client might be trying to perform an operation that it is not authorized
@@ -113,12 +118,8 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // be other causes of this scenario, we don't want to hide a potential
 // programming error.
 //
-// If the cookie exists but the access token can't be verified, then
-// the cookie is deleted and http.StatusInternalServerError is sent. Since the
-// server is responsible for generating the token in the first place, a
-// potential server programming error is indicated. Again, there could be
-// another cause (like a forgery attempt), but we don't want to hide a
-// programming error.
+// verifyCookie calls getUidFromJwt internally. See that function's
+// documentation for additional error scenarios.
 func (h *apiHandler) verifyCookie(w http.ResponseWriter, r *http.Request) string {
 	c, err := r.Cookie(h.cookieName)
 	if err != nil {
@@ -126,8 +127,19 @@ func (h *apiHandler) verifyCookie(w http.ResponseWriter, r *http.Request) string
 		w.WriteHeader(http.StatusBadRequest)
 		return ""
 	}
+	return h.getUidFromJwt(w, c.Value)
+}
+
+// getUidFromJwt verifies the JWT and extracts the user ID.
+//
+// If the JWT can't be verified, then the containing cookie is deleted and
+// http.StatusInternalServerError is sent. Since the server is responsible for
+// generating the JWT in the first place, a potential server programming error
+// is indicated. There could be another cause (like a forgery attempt), but we
+// don't want to hide a programming error.
+func (h *apiHandler) getUidFromJwt(w http.ResponseWriter, tokenString string) string {
 	token, err := jwt.Parse(
-		c.Value,
+		tokenString,
 		func(t *jwt.Token) (interface{}, error) {
 			return h.jwtSigningKey, nil
 		},
@@ -200,6 +212,49 @@ func getUidAndPwd(pool *pgxpool.Pool, name string) (uid string, pwd string, err 
 	query := "SELECT id, password FROM users WHERE name = $1"
 	row := pool.QueryRow(context.Background(), query, name)
 	err = row.Scan(&uid, &pwd)
+	return
+}
+
+func (h *apiHandler) serveGetUsername(w http.ResponseWriter, r *http.Request) {
+	c, err := r.Cookie(h.cookieName)
+	if err != nil {
+		// User is not logged in.
+		writeJson(w, &getUsernameResp{Username: ""})
+		return
+	}
+	uid := h.getUidFromJwt(w, c.Value)
+	if uid == "" {
+		return
+	}
+	username, err := getUsername(h.pool, uid)
+	if err == pgx.ErrNoRows {
+		log.Println("Warning: client is logged in as a non-existent user.")
+		// This is not necessarily a client error. The user could have deleted
+		// their account on a separate client.
+		// Assume that this request is always sent when the page loads. Now is
+		// a good time to log them out (i.e., after the app has stopped working
+		// properly and they've refreshed the page). In the future, to avoid
+		// this coupling, it might make more sense to check the user ID's
+		// existence earlier on - maybe when serving the js file?
+		writeDeleteCookie(w, h.cookieName)
+		writeJson(w, &getUsernameResp{Username: ""})
+		return
+	}
+	if err != nil {
+		log.Printf("Failed to get username for UID \"%v\": %v", uid, err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writeJson(w, &getUsernameResp{Username: username})
+	return
+}
+
+// getUsername gets the username for the given user ID, or returns an error. It
+// returns pgx.ErrNoRows if the user ID doesn't exist.
+func getUsername(pool *pgxpool.Pool, uid string) (name string, err error) {
+	query := "SELECT name FROM users WHERE id = $1"
+	row := pool.QueryRow(context.Background(), query, uid)
+	err = row.Scan(&name)
 	return
 }
 

@@ -38,53 +38,63 @@ function init() {
 function App({ apiUrl }) {
   console.log("rendering App");
 
-  // state is "logged out", "logged in", "logging out", or "error".
-  const [state, setState] = React.useState("logged out");
+  const [loading, error] = [0, 1];
+  // state is loading, error, or the current username ("" if not logged in).
+  const [state, setState] = React.useState(loading);
+  // Wrap getUsername in a non-async function to keep React from complaining.
+  React.useEffect(() => { getUsername() }, []);
 
-  async function logout() {
-    setState("logging out");
-    const result = await callApiNoParse(apiUrl, "logout");
+  async function getUsername() {
+    const result = await callApi(apiUrl, "getUsername");
     if (result === "failed") {
-      setState("error");
+      setState(error);
       return;
     }
-    setState("logged out");
+    setState(result.username);
   }
 
-  if (state === "logged out") {
-    return (
-      <AppBarAndContent
-        content={
-          <LoginForm apiUrl={apiUrl} onLoggedIn={() => setState("logged in")} />
-        }
-      />
-    );
+  async function logout() {
+    setState(loading);
+    const result = await callApiNoParse(apiUrl, "logout");
+    if (result === "failed") {
+      setState(error);
+      return;
+    }
+    setState("");
   }
-  if (state === "logged in") {
-    const syncStore = newSyncStore();
-    const todoStore = newTodoStore(apiUrl, syncStore);
-    return (
-      <AppBarAndContent
-        appBarCenterText={<SyncText syncStore={syncStore} />}
-        appBarRight={<Account onLogout={logout} />}
-        content={<TodoList todoStore={todoStore} />}
-      />
-    );
-  }
-  if (state === "logging out") {
+
+  if (state === loading) {
     return (
       <AppBarAndContent
         content={<Loading />}
       />
     );
   }
-  if (state === "error") {
+  if (state === error) {
     return (
       <AppBarAndContent
         content={<ActionFailedAlert />}
       />
     );
   }
+  if (state === "") {
+    return (
+      <AppBarAndContent
+        content={
+          <LoginForm apiUrl={apiUrl} onLoggedIn={setState} />
+        }
+      />
+    );
+  }
+  const syncStore = newSyncStore();
+  const todoStore = newTodoStore(apiUrl, syncStore);
+  return (
+    <AppBarAndContent
+      appBarCenterText={<SyncText syncStore={syncStore} />}
+      appBarRight={<Account username={state} onLogout={logout} />}
+      content={<TodoList todoStore={todoStore} />}
+    />
+  );
 }
 
 function AppBarAndContent({ appBarCenterText, appBarRight, content }) {
@@ -152,7 +162,7 @@ function LoginForm({ apiUrl, onLoggedIn }) {
       setState({ ...state, isInvalid: true });
       return;
     }
-    onLoggedIn();
+    onLoggedIn(username);
   }
 
   if (state === "error") {
@@ -208,11 +218,11 @@ function LoginForm({ apiUrl, onLoggedIn }) {
   );
 }
 
-function Account({ onLogout }) {
+function Account({ username, onLogout }) {
   return (
     <Box sx={{ display: "flex", alignItems: "center" }}>
       <Typography>
-        default
+        {username}
       </Typography>
       <IconButton sx={{ color: "#ffffff" }} onClick={onLogout}>
         <Logout />
@@ -243,7 +253,6 @@ function TodoList({ todoStore }) {
   );
 
   const state = todoStore.getState();
-  console.log(state);
 
   if (state === "error") {
     return <ActionFailedAlert />;

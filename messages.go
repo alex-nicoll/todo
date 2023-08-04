@@ -19,6 +19,14 @@ type logoutRqst struct {
 	Operation string `json:"operation"`
 }
 
+type getUsernameRqst struct {
+	Operation string `json:"operation"`
+}
+
+type getUsernameResp struct {
+	Username string `json:"username"`
+}
+
 type getTodosRqst struct {
 	Operation string `json:"operation"`
 }
