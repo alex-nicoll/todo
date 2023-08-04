@@ -73,6 +73,11 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveLogin(w, lr)
 		return
 	}
+	lor := &logoutRqst{}
+	if err := json.Unmarshal(body, lor); err == nil && lor.Operation == "logout" {
+		writeDeleteCookie(w, h.cookieName)
+		return
+	}
 	gtr := &getTodosRqst{}
 	if err := json.Unmarshal(body, gtr); err == nil && gtr.Operation == "getTodos" {
 		withVerifyCookie(func(uid string) { h.serveGetTodos(w, uid) })(h, w, r)
@@ -130,10 +135,7 @@ func (h *apiHandler) verifyCookie(w http.ResponseWriter, r *http.Request) string
 	)
 	if err != nil {
 		log.Println(err)
-		http.SetCookie(w, &http.Cookie{
-			Name:   h.cookieName,
-			MaxAge: -1,
-		})
+		writeDeleteCookie(w, h.cookieName)
 		w.WriteHeader(http.StatusInternalServerError)
 		return ""
 	}
@@ -151,6 +153,15 @@ func withVerifyCookie(f func(string)) func(*apiHandler, http.ResponseWriter, *ht
 			f(uid)
 		}
 	}
+}
+
+// writeDeleteCookie writes a response header that instructs the client to
+// delete the named cookie.
+func writeDeleteCookie(w http.ResponseWriter, cookieName string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:   cookieName,
+		MaxAge: -1,
+	})
 }
 
 func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {

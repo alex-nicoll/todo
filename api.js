@@ -3,19 +3,8 @@
 // and parses the response body as JSON. If an error is encountered, it returns
 // "failed". Otherwise, it returns the parsed response body.
 export async function callApi(apiUrl, operation, args) {
-  let resp;
-  try {
-    const options = {
-      method: "POST",
-      body: JSON.stringify({ operation, ...args })
-    };
-    console.log(options);
-    resp = await fetch(apiUrl, options);
-  } catch (e) {
-    console.error(e);
-    return "failed";
-  }
-  if (resp.status !== 200) {
+  const resp = await callApiNoParse(apiUrl, operation, args);
+  if (resp === "failed") {
     return "failed";
   }
   let v;
@@ -27,4 +16,25 @@ export async function callApi(apiUrl, operation, args) {
   }
   console.log(v);
   return v;
+}
+
+// callApiNoParse is like callApi, except it doesn't try to parse the response
+// body as JSON. If no error is encountered, it returns a Response object.
+export async function callApiNoParse(apiUrl, operation, args) {
+  const options = {
+    method: "POST",
+    body: JSON.stringify({ operation, ...args })
+  };
+  console.log(options);
+  let resp;
+  try {
+    resp = await fetch(apiUrl, options);
+  } catch (e) {
+    console.error(e);
+    return "failed";
+  }
+  if (resp.status !== 200) {
+    return "failed";
+  }
+  return resp;
 }

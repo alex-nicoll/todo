@@ -23,7 +23,7 @@ import { createTheme, ThemeProvider } from "@mui/material/styles";
 import Add from "@mui/icons-material/Add";
 import Clear from "@mui/icons-material/Clear";
 import Logout from "@mui/icons-material/Logout";
-import { callApi } from "./api.js";
+import { callApi, callApiNoParse } from "./api.js";
 import { newTodoStore } from "./todoStore.js";
 import { newSyncStore } from "./syncStore.js";
 
@@ -38,25 +38,53 @@ function init() {
 function App({ apiUrl }) {
   console.log("rendering App");
 
-  const [isLoggedIn, setIsLoggedIn] = React.useState(false);
-  if (!isLoggedIn) {
+  // state is "logged out", "logged in", "logging out", or "error".
+  const [state, setState] = React.useState("logged out");
+
+  async function logout() {
+    setState("logging out");
+    const result = await callApiNoParse(apiUrl, "logout");
+    if (result === "failed") {
+      setState("error");
+      return;
+    }
+    setState("logged out");
+  }
+
+  if (state === "logged out") {
     return (
       <AppBarAndContent
         content={
-          <LoginForm apiUrl={apiUrl} onLoggedIn={() => setIsLoggedIn(true)} />
+          <LoginForm apiUrl={apiUrl} onLoggedIn={() => setState("logged in")} />
         }
       />
     );
   }
-  const syncStore = newSyncStore();
-  const todoStore = newTodoStore(apiUrl, syncStore);
-  return (
-    <AppBarAndContent
-      appBarCenterText={<SyncText syncStore={syncStore} />}
-      appBarRight={<Account onLogout={() => setIsLoggedIn(false)} />}
-      content={<TodoList todoStore={todoStore} />}
-    />
-  );
+  if (state === "logged in") {
+    const syncStore = newSyncStore();
+    const todoStore = newTodoStore(apiUrl, syncStore);
+    return (
+      <AppBarAndContent
+        appBarCenterText={<SyncText syncStore={syncStore} />}
+        appBarRight={<Account onLogout={logout} />}
+        content={<TodoList todoStore={todoStore} />}
+      />
+    );
+  }
+  if (state === "logging out") {
+    return (
+      <AppBarAndContent
+        content={<Loading />}
+      />
+    );
+  }
+  if (state === "error") {
+    return (
+      <AppBarAndContent
+        content={<ActionFailedAlert />}
+      />
+    );
+  }
 }
 
 function AppBarAndContent({ appBarCenterText, appBarRight, content }) {
@@ -221,39 +249,32 @@ function TodoList({ todoStore }) {
     return <ActionFailedAlert />;
   }
 
-  let listItems;
   if (state === "loading") {
-    listItems = (
-      <ListItem sx={{ justifyContent: "center" }} >
-        <CircularProgress />
-      </ListItem>
-    );
-  } else {
-    listItems = [];
-    state.forEach((value, id) => listItems.push(
-      <ListItem key={id}>
-        <TodoTextField
-          todoId={id}
-          todoStore={todoStore}
-        />
-        <IconButton onClick={() => todoStore.deleteTodo(id)}>
-          <Clear />
-        </IconButton>
-      </ListItem>
-    ));
-    listItems.push(
+    return <Loading />
+  }
+
+  let todos = [];
+  state.forEach((value, id) => todos.push(
+    <ListItem key={id}>
+      <TodoTextField
+        todoId={id}
+        todoStore={todoStore}
+      />
+      <IconButton onClick={() => todoStore.deleteTodo(id)}>
+        <Clear />
+      </IconButton>
+    </ListItem>
+  ));
+
+  return (
+    <List>
+      {todos}
       <ListItemButton onClick={todoStore.appendTodo}>
         <ListItemIcon>
           <Add />
         </ListItemIcon>
         <ListItemText primary="New item" />
       </ListItemButton>
-    );
-  }
-
-  return (
-    <List>
-      {listItems}
     </List>
   );
 }
@@ -277,6 +298,14 @@ function TodoTextField({ todoId, todoStore }) {
       value={todoStore.getState().get(todoId)}
       onChange={(e) => todoStore.updateTodo(todoId, e.target.value)}
     />
+  );
+}
+
+function Loading() {
+  return (
+    <Box sx={{ padding: "24px 0", display: "flex", justifyContent: "center" }}>
+      <CircularProgress />
+    </Box>
   );
 }
 

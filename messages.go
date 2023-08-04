@@ -14,6 +14,11 @@ type loginResp struct {
 	DidLogin bool `json:"didLogin"`
 }
 
+// Logout requests do not return any JSON.
+type logoutRqst struct {
+	Operation string `json:"operation"`
+}
+
 type getTodosRqst struct {
 	Operation string `json:"operation"`
 }
@@ -36,6 +41,7 @@ type updateTodoRqst struct {
 	Value     string `json:"value"`
 }
 
+// This is the response type for both delete and update requests.
 type mutateTodoResp struct {
 	Version int32 `json:"version"`
 }
