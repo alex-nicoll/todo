@@ -1,5 +1,5 @@
 import * as React from "react";
-import * as ReactDOM from "react-dom";
+import * as ReactDOM from "react-dom/client";
 import { LoadingButton } from "@mui/lab";
 import {
   Alert,
@@ -182,14 +182,14 @@ function LoginForm({ apiUrl, onLoggedIn }) {
       </Typography>
       <TextField
         sx={style}
-        spellcheck={false}
+        spellCheck={false}
         label="Username"
         value={state.username}
         onChange={(e) => setState({ ...state, username: e.target.value })}
       />
       <TextField
         sx={style}
-        spellcheck={false}
+        spellCheck={false}
         label="Password"
         value={state.password}
         onChange={(e) => setState({ ...state, password: e.target.value })}
@@ -294,7 +294,7 @@ function TodoTextField({ todoId, todoStore }) {
       fullWidth
       size="small"
       placeholder="Item"
-      spellcheck="false"
+      spellCheck="false"
       value={todoStore.getState().get(todoId)}
       onChange={(e) => todoStore.updateTodo(todoId, e.target.value)}
     />
