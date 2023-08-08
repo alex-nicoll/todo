@@ -41,7 +41,8 @@ function App({ apiUrl }) {
   const [loading, error] = [0, 1];
   // state is loading, error, or the current username ("" if not logged in).
   const [state, setState] = React.useState(loading);
-  // Wrap getUsername in a non-async function to keep React from complaining.
+  // The function passed to useEffect should return a function or undefined.
+  // Wrap getUserName in a sync function to avoid returning a Promise.
   React.useEffect(() => { getUsername() }, []);
 
   async function getUsername() {
@@ -81,7 +82,11 @@ function App({ apiUrl }) {
     return (
       <AppBarAndContent
         content={
-          <LoginForm apiUrl={apiUrl} onLoggedIn={setState} />
+          <LoginForm
+            apiUrl={apiUrl}
+            onLoggedIn={setState}
+            onError={() => setState(error)}
+          />
         }
       />
     );
@@ -139,7 +144,7 @@ function AppBarAndContent({ appBarCenterText, appBarRight, content }) {
   );
 }
 
-function LoginForm({ apiUrl, onLoggedIn }) {
+function LoginForm({ apiUrl, onLoggedIn, onError }) {
   console.log("rendering LoginForm");
 
   const [state, setState] = React.useState({
@@ -154,7 +159,7 @@ function LoginForm({ apiUrl, onLoggedIn }) {
     const { username, password } = state;
     const result = await callApi(apiUrl, "login", { username, password });
     if (result === "failed") {
-      setState("error");
+      onError();
       return;
     }
     if (result.didLogin === false) {
@@ -163,10 +168,6 @@ function LoginForm({ apiUrl, onLoggedIn }) {
       return;
     }
     onLoggedIn(username);
-  }
-
-  if (state === "error") {
-    return <ActionFailedAlert />;
   }
 
   const style = { margin: "10px 0" };
