@@ -24,85 +24,78 @@ import Add from "@mui/icons-material/Add";
 import Clear from "@mui/icons-material/Clear";
 import Logout from "@mui/icons-material/Logout";
 import { callApi, callApiNoParse } from "./api.js";
-import { newTodoStore } from "./todoStore.js";
+import { newAppBarCenterFsm } from "./appBarCenterFsm.js";
+import { newAppBarRightFsm } from "./appBarRightFsm.js";
+import { newContentFsm } from "./contentFsm.js";
+import { newDispatcher } from "./dispatcher.js";
+import { newTodosMap, newTodoStore } from "./todoStore.js";
 import { newSyncStore } from "./syncStore.js";
 
 init();
 
 function init() {
   const apiUrl = `${document.location.origin}/api`;
+  const dispatcher = newDispatcher();
+  const appBarCenterFsm = newAppBarCenterFsm(dispatcher);
+  const appBarRightFsm = newAppBarRightFsm(dispatcher);
+  const contentFsm = newContentFsm(dispatcher);
+  loadInitialState(apiUrl, dispatcher);
   const root = ReactDOM.createRoot(document.getElementById("root"));
-  root.render(<App apiUrl={apiUrl} />);
-}
-
-function App({ apiUrl }) {
-  console.log("rendering App");
-
-  const [loading, error] = [0, 1];
-  // state is loading, error, or the current username ("" if not logged in).
-  const [state, setState] = React.useState(loading);
-  // The function passed to useEffect should return a function or undefined.
-  // Wrap getUserName in a sync function to avoid returning a Promise.
-  React.useEffect(() => { getUsername() }, []);
-
-  async function getUsername() {
-    const result = await callApi(apiUrl, "getUsername");
-    if (result === "failed") {
-      setState(error);
-      return;
-    }
-    setState(result.username);
-  }
-
-  async function logout() {
-    setState(loading);
-    const result = await callApiNoParse(apiUrl, "logout");
-    if (result === "failed") {
-      setState(error);
-      return;
-    }
-    setState("");
-  }
-
-  if (state === loading) {
-    return (
-      <AppBarAndContent
-        content={<Loading />}
-      />
-    );
-  }
-  if (state === error) {
-    return (
-      <AppBarAndContent
-        content={<ActionFailedAlert />}
-      />
-    );
-  }
-  if (state === "") {
-    return (
-      <AppBarAndContent
-        content={
-          <LoginForm
-            apiUrl={apiUrl}
-            onLoggedIn={setState}
-            onError={() => setState(error)}
-          />
-        }
-      />
-    );
-  }
-  const syncStore = newSyncStore();
-  const todoStore = newTodoStore(apiUrl, syncStore);
-  return (
+  root.render(
     <AppBarAndContent
-      appBarCenterText={<SyncText syncStore={syncStore} />}
-      appBarRight={<Account username={state} onLogout={logout} />}
-      content={<TodoList todoStore={todoStore} />}
+      apiUrl={apiUrl}
+      dispatcher={dispatcher}
+      appBarCenterFsm={appBarCenterFsm}
+      appBarRightFsm={appBarRightFsm}
+      contentFsm={contentFsm}
     />
   );
 }
 
-function AppBarAndContent({ appBarCenterText, appBarRight, content }) {
+async function loadInitialState(apiUrl, dispatcher) {
+  const result = await callApi(apiUrl, "getUsername");
+  if (result === "failed") {
+    dispatcher.dispatch({ id: "getUsernameError" });
+    return;
+  }
+  const { username } = result;
+  if (username === "") {
+    dispatcher.dispatch({ id: "usernameNotLoaded" });
+    return;
+  }
+  dispatcher.dispatch({ id: "usernameLoaded", username });
+  loadTodos(apiUrl, dispatcher);
+}
+
+async function loadTodos(apiUrl, dispatcher) {
+  const result = await callApi(apiUrl, "getTodos");
+  if (result === "failed") {
+    dispatcher.dispatch({ id: "getTodosError" });
+    return;
+  }
+  const { version, todos } = result;
+  const syncStore = newSyncStore();
+  const todoStore = newTodoStore({
+    apiUrl,
+    dispatcher,
+    syncStore,
+    version,
+    todos: newTodosMap(todos),
+  });
+  dispatcher.dispatch({
+    id: "todosLoaded",
+    todoStore,
+    syncStore,
+  });
+}
+
+function AppBarAndContent({
+  apiUrl,
+  dispatcher, 
+  appBarCenterFsm,
+  appBarRightFsm,
+  contentFsm,
+}) {
   const theme = createTheme({
     palette: {
       primary: indigo,
@@ -129,22 +122,119 @@ function AppBarAndContent({ appBarCenterText, appBarRight, content }) {
           </Typography>
         </Box>
         <Box sx={{ flex: "1", display: "flex", justifyContent: "center" }}>
-          <Typography>
-            {appBarCenterText}
-          </Typography>
+          <AppBarCenter fsm={appBarCenterFsm} />
         </Box>
         <Box sx={{ flex: "1", display: "flex", justifyContent: "right" }}>
-          {appBarRight}
+          <AppBarRight
+            fsm={appBarRightFsm}
+            apiUrl={apiUrl}
+            dispatcher={dispatcher}
+          />
         </Box>
       </AppBar>
       <Container maxWidth="sm" sx={{ marginTop: appBarHeight }}>
-        {content}
+        <Content fsm={contentFsm} apiUrl={apiUrl} dispatcher={dispatcher} />
       </Container>
     </ThemeProvider>
   );
 }
 
-function LoginForm({ apiUrl, onLoggedIn, onError }) {
+function useSubscribeToFsm(fsm) {
+  const [_, setState] = React.useState({});
+  React.useEffect(
+    () => fsm.subscribe(() => setState({})),
+    []
+  );
+}
+
+function AppBarCenter({ fsm }) {
+  console.log("rendering AppBarCenter");
+
+  useSubscribeToFsm(fsm);
+
+  const state = fsm.getState();
+  if (state.tag === "empty") {
+    return undefined;
+  }
+  if (state.tag === "sync") {
+    return (
+      <Typography>
+        <SyncText syncStore={state.syncStore} />
+      </Typography>
+    );
+  }
+  throw new Error(`No render logic defined for state "${state.tag}"`);
+}
+
+function AppBarRight({ fsm, apiUrl, dispatcher }) {
+  console.log("rendering AppBarRight");
+
+  useSubscribeToFsm(fsm);
+
+  async function logout() {
+    dispatcher.dispatch({ id: "logoutClicked" });
+    const result = await callApiNoParse(apiUrl, "logout");
+    if (result === "failed") {
+      dispatcher.dispatch({ id: "logoutError" });
+      return;
+    }
+    dispatcher.dispatch({ id: "loggedOut" });
+  }
+
+  const state = fsm.getState();
+  if (state.tag === "empty") {
+    return undefined;
+  }
+  if (state.tag === "account") {
+    return (
+      <Box sx={{ display: "flex", alignItems: "center" }}>
+        <Typography>
+          {state.username}
+        </Typography>
+        <IconButton sx={{ color: "#ffffff" }} onClick={logout}>
+          <Logout />
+        </IconButton>
+      </Box>
+    );
+  }
+  throw new Error(`No render logic defined for state "${state.tag}"`);
+}
+
+function Content({ fsm, apiUrl, dispatcher }) {
+  console.log("rendering Content");
+
+  useSubscribeToFsm(fsm);
+
+  const state = fsm.getState();
+  if (state.tag === "loadingUsername" ||
+    state.tag === "loadingTodos" ||
+    state.tag === "loggingOut") {
+    return (
+      <Box sx={{ padding: "24px 0", display: "flex", justifyContent: "center" }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+  if (state.tag === "error") {
+    return (
+      <Box sx={{ padding: "16px 0" }}>
+        <Alert severity="error">
+          There was a problem completing the requested action. If this problem
+          persists, please try again later.
+        </Alert>
+      </Box>
+    );
+  }
+  if (state.tag === "login") {
+    return <LoginForm apiUrl={apiUrl} dispatcher={dispatcher} />;
+  }
+  if (state.tag === "todos") {
+    return <TodoList todoStore={state.todoStore} />
+  }
+  throw new Error(`No render logic defined for state "${state.tag}"`);
+}
+
+function LoginForm({ apiUrl, dispatcher }) {
   console.log("rendering LoginForm");
 
   const [state, setState] = React.useState({
@@ -159,7 +249,7 @@ function LoginForm({ apiUrl, onLoggedIn, onError }) {
     const { username, password } = state;
     const result = await callApi(apiUrl, "login", { username, password });
     if (result === "failed") {
-      onError();
+      dispatcher.dispatch({ id: "loginError" });
       return;
     }
     if (result.didLogin === false) {
@@ -167,7 +257,8 @@ function LoginForm({ apiUrl, onLoggedIn, onError }) {
       setState({ ...state, isInvalid: true });
       return;
     }
-    onLoggedIn(username);
+    dispatcher.dispatch({ id: "loggedIn", username });
+    loadTodos(apiUrl, dispatcher);
   }
 
   const style = { margin: "10px 0" };
@@ -219,19 +310,6 @@ function LoginForm({ apiUrl, onLoggedIn, onError }) {
   );
 }
 
-function Account({ username, onLogout }) {
-  return (
-    <Box sx={{ display: "flex", alignItems: "center" }}>
-      <Typography>
-        {username}
-      </Typography>
-      <IconButton sx={{ color: "#ffffff" }} onClick={onLogout}>
-        <Logout />
-      </IconButton>
-    </Box>
-  );
-}
-
 function SyncText({ syncStore }) {
   console.log("rendering SyncText");
 
@@ -253,18 +331,8 @@ function TodoList({ todoStore }) {
     []
   );
 
-  const state = todoStore.getState();
-
-  if (state === "error") {
-    return <ActionFailedAlert />;
-  }
-
-  if (state === "loading") {
-    return <Loading />
-  }
-
-  let todos = [];
-  state.forEach((value, id) => todos.push(
+  let todoListItems = [];
+  todoStore.getTodos().forEach((value, id) => todoListItems.push(
     <ListItem key={id}>
       <TodoTextField
         todoId={id}
@@ -278,7 +346,7 @@ function TodoList({ todoStore }) {
 
   return (
     <List>
-      {todos}
+      {todoListItems}
       <ListItemButton onClick={todoStore.appendTodo}>
         <ListItemIcon>
           <Add />
@@ -305,27 +373,8 @@ function TodoTextField({ todoId, todoStore }) {
       size="small"
       placeholder="Item"
       spellCheck="false"
-      value={todoStore.getState().get(todoId)}
+      value={todoStore.getTodos().get(todoId)}
       onChange={(e) => todoStore.updateTodo(todoId, e.target.value)}
     />
-  );
-}
-
-function Loading() {
-  return (
-    <Box sx={{ padding: "24px 0", display: "flex", justifyContent: "center" }}>
-      <CircularProgress />
-    </Box>
-  );
-}
-
-function ActionFailedAlert() {
-  return (
-    <Box sx={{ padding: "16px 0" }}>
-      <Alert severity="error">
-        There was a problem completing the requested action. If this problem
-        persists, please try again later.
-      </Alert>
-    </Box>
   );
 }

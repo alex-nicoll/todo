@@ -7,17 +7,19 @@ import { callApi } from "./api.js";
 // each todo render independently. I.e., when the user types, only the text
 // field that they are typing into renders - not the entire todo list. This
 // improves performance when typing.
-export function newTodoStore(apiUrl, syncStore) {
-
-  // state is "loading", "error", or a map from todo ID to todo value. 
-  let state = "loading";
-
-  // version is the current todo list version.
-  let version;
+//
+// - apiUrl is the URL with which API calls should be executed.
+// - dispatcher is the Dispatcher instance through which sync error events will
+// be dispatched.
+// - syncStore is the SyncStore instance associated with this TodoStore. It will
+// be incremented and decremented when appropriate.
+// - version is the current todo list version.
+// - todos is a map from todo ID to todo value.
+export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }) {
 
   // lastTask is a queue of tasks implemented as a Promise chain.
-  // It allows operations after the initial GET to be performed serially so
-  // that each request contains the correct todo list version.
+  // It allows operations to be performed serially so that each request
+  // contains the correct todo list version.
   let lastTask = Promise.resolve();
 
   // todosUpdating is the set of todo IDs for which there are pending update
@@ -32,15 +34,13 @@ export function newTodoStore(apiUrl, syncStore) {
   // todo list mounts. It should be passed a function that forces the component
   // to render.
   //
-  // The render function is called whenever the return value of getState()
-  // changes. If getState() returns a map, the render function is called
-  // whenever the keys (todo IDs) change.
+  // The render function is called whenever the todo IDs (keys of the map
+  // returned by getTodos) change, but not when the todo values change.
   //
   // listDidMount returns a function that should be called before the component
   // unmounts.
   function listDidMount(render) {
     renderList = render;
-    initTodos();
     return () => renderList = undefined;
   }
 
@@ -57,31 +57,19 @@ export function newTodoStore(apiUrl, syncStore) {
     return () => mapRenderTextField.delete(id);
   }
 
-  // getState returns "loading", "error", or a map from todo ID to todo value. 
-  function getState() {
-    return state;
-  }
-
-  async function initTodos() {
-    const result = await callApi(apiUrl, "getTodos");
-    if (result === "failed") {
-      state = "error";
-      renderList();
-      return;
-    }
-    version = result.version;
-    state = newTodosMap(result.todos);
-    renderList();
+  // getTodos returns a map from todo ID to todo value. 
+  function getTodos() {
+    return todos;
   }
 
   function deleteTodo(id) {
-    state.delete(id);
+    todos.delete(id);
     renderList();
     enqueue(() => callApiWithVersion("deleteTodo", { id }));
   }
 
   async function updateTodo(id, value) {
-    state.set(id, value);
+    todos.set(id, value);
     mapRenderTextField.get(id)();
     if (todosUpdating.has(id)) {
       return;
@@ -91,7 +79,7 @@ export function newTodoStore(apiUrl, syncStore) {
     // Wait for 2 seconds.
     await new Promise((resolve) => setTimeout(resolve, 2000));
     todosUpdating.delete(id);
-    if (!state.has(id)) {
+    if (!todos.has(id)) {
       // todo was deleted while we were waiting.
       syncStore.decrement();
       return;
@@ -99,7 +87,7 @@ export function newTodoStore(apiUrl, syncStore) {
     // Instead of using enqueue, update lastTask directly to avoid incrementing
     // and decrementing the sync count an additional time.
     lastTask = lastTask.then(
-      () => callApiWithVersion("updateTodo", { id, value: state.get(id) })
+      () => callApiWithVersion("updateTodo", { id, value: todos.get(id) })
     );
     await lastTask;
     syncStore.decrement();
@@ -110,7 +98,7 @@ export function newTodoStore(apiUrl, syncStore) {
     if (result === "done") {
       return;
     }
-    state.set(result.id, "");
+    todos.set(result.id, "");
     renderList();
   }
 
@@ -130,21 +118,19 @@ export function newTodoStore(apiUrl, syncStore) {
   //
   // It returns "done" if the request failed, or if the request succeeded and
   // the todo list has been downloaded and rerendered due to a version mismatch
-  // detected by the server. If the request failed, then state has already been
-  // set to "error". Essentially, "done" indicates that there are no further
-  // state updates to perform and the caller can safely return.
+  // detected by the server. If the request failed, a sync error event is
+  // dispatched.
   //
   // Otherwise, it returns the response body parsed as JSON.
   async function callApiWithVersion(operation, args) {
     const result = await callApi(apiUrl, operation, { version, ...args });
     if (result === "failed") {
-      state = "error";
-      renderList();
+      dispatcher.dispatch({ id: "syncError" });
       return "done";
     }
     version = result.version;
     if (result.todos !== undefined) {
-      state = newTodosMap(result.todos);
+      todos = newTodosMap(result.todos);
       renderList();
       return "done";
     }
@@ -154,14 +140,14 @@ export function newTodoStore(apiUrl, syncStore) {
   return {
     listDidMount,
     textFieldDidMount,
-    getState,
+    getTodos,
     deleteTodo,
     updateTodo,
     appendTodo
   };
 }
 
-function newTodosMap(todos) {
+export function newTodosMap(todos) {
   const todosMap = new Map();
   for (const [id, value] of todos) {
     todosMap.set(id, value)
