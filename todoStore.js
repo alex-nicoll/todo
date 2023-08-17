@@ -4,9 +4,11 @@ import { callApi } from "./api.js";
 // changing the list and replicating those changes to the server.
 //
 // TodoStore also solves the problem of having the text field associated with
-// each todo render independently. I.e., when the user types, only the text
-// field that they are typing into renders - not the entire todo list. This
-// improves performance when typing.
+// each todo render independently, which improves performance when typing.
+// I.e., when the user types, only the text field that they are typing into
+// renders - not the entire todo list. This can be achieved by having text
+// field React components call subscribeToValue in an effect. A list component,
+// on the other hand, might call subscribeToKeys in an effect.
 //
 // - apiUrl is the URL with which API calls should be executed.
 // - dispatcher is the Dispatcher instance through which sync error events will
@@ -26,35 +28,28 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }) 
   // operations.
   const todosUpdating = new Set();
 
-  let renderList;
+  let keySubscriber;
 
-  const mapRenderTextField = new Map();
+  const mapValueSubscribers = new Map();
 
-  // listDidMount should be called when the component representing the entire
-  // todo list mounts. It should be passed a function that forces the component
-  // to render.
+  // subscribeToKeys registers a callback to be invoked whenever the todo IDs
+  // (keys of the map returned by getTodos) change, but not when the todo
+  // values change. At most one callback may be registered.
   //
-  // The render function is called whenever the todo IDs (keys of the map
-  // returned by getTodos) change, but not when the todo values change.
-  //
-  // listDidMount returns a function that should be called before the component
-  // unmounts.
-  function listDidMount(render) {
-    renderList = render;
-    return () => renderList = undefined;
+  // subscribeToKeys returns a function that unregisters the callback.
+  function subscribeToKeys(callback) {
+    keySubscriber = callback;
+    return () => keySubscriber = undefined;
   }
 
-  // textFieldDidMount should be called when the component representing the
-  // text field of a particular todo mounts. It should be passed the todo ID
-  // and a function that forces the component to render.
+  // subscribeToValue registers a callback to be invoked whenever the value
+  // associated with the given todo ID changes. At most one callback may be
+  // registered per todo ID.
   //
-  // The render function is called whenever the associated todo value changes.
-  //
-  // textFieldDidMount returns a function that should be called before the
-  // component unmounts.
-  function textFieldDidMount(id, render) {
-    mapRenderTextField.set(id, render);
-    return () => mapRenderTextField.delete(id);
+  // subscribeToValue returns a function that unregisters the callback.
+  function subscribeToValue(id, callback) {
+    mapValueSubscribers.set(id, callback);
+    return () => mapValueSubscribers.delete(id);
   }
 
   // getTodos returns a map from todo ID to todo value. 
@@ -64,13 +59,13 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }) 
 
   function deleteTodo(id) {
     todos.delete(id);
-    renderList();
+    keySubscriber();
     enqueue(() => callApiWithVersion("deleteTodo", { id }));
   }
 
   async function updateTodo(id, value) {
     todos.set(id, value);
-    mapRenderTextField.get(id)();
+    mapValueSubscribers.get(id)();
     if (todosUpdating.has(id)) {
       return;
     }
@@ -99,7 +94,7 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }) 
       return;
     }
     todos.set(result.id, "");
-    renderList();
+    keySubscriber();
   }
 
   // enqueue adds an async function to the back of the task queue. It returns a
@@ -131,15 +126,15 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }) 
     version = result.version;
     if (result.todos !== undefined) {
       todos = newTodosMap(result.todos);
-      renderList();
+      keySubscriber();
       return "done";
     }
     return result;
   }
 
   return {
-    listDidMount,
-    textFieldDidMount,
+    subscribeToKeys,
+    subscribeToValue,
     getTodos,
     deleteTodo,
     updateTodo,

@@ -315,7 +315,7 @@ function SyncText({ syncStore }) {
 
   const [_, setState] = React.useState({});
   React.useEffect(
-    () => syncStore.syncIndicatorDidMount(() => setState({})),
+    () => syncStore.subscribe(() => setState({})),
     []
   );
 
@@ -327,7 +327,7 @@ function TodoList({ todoStore }) {
 
   const [_, setState] = React.useState({});
   React.useEffect(
-    () => todoStore.listDidMount(() => setState({})),
+    () => todoStore.subscribeToKeys(() => setState({})),
     []
   );
 
@@ -362,7 +362,7 @@ function TodoTextField({ todoId, todoStore }) {
 
   const [_, setState] = React.useState({});
   React.useEffect(
-    () => todoStore.textFieldDidMount(todoId, () => setState({})),
+    () => todoStore.subscribeToValue(todoId, () => setState({})),
     []
   );
 

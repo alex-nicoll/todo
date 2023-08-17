@@ -4,20 +4,15 @@ export function newSyncStore() {
   // count is the number of synchronization operations in progress.
   let count = 0;
 
-  let renderSyncIndicator;
+  let subscriber;
 
-  // syncIndicatorDidMount should be called when the sync indicator component
-  // mounts. It should be passed a function that forces the component to
-  // render.
+  // subscribe registers a callback to be invoked whenever the return value of
+  // isSyncing() changes. At most one callback may be registered.
   //
-  // The render function is called whenever the return value of isSyncing()
-  // changes.
-  //
-  // syncIndicatorDidMount returns a function that should be called before the
-  // component unmounts.
-  function syncIndicatorDidMount(render) {
-    renderSyncIndicator = render;
-    return () => renderSyncIndicator = undefined;
+  // subscribe returns a function that unregisters the callback.
+  function subscribe(callback) {
+    subscriber = callback;
+    return () => subscriber = undefined;
   }
 
   // isSyncing returns true if changes are currently being synchronized with
@@ -30,7 +25,7 @@ export function newSyncStore() {
   function increment() {
     count++;
     if (count === 1) {
-      renderSyncIndicator();
+      subscriber();
     }
   }
 
@@ -38,12 +33,12 @@ export function newSyncStore() {
   function decrement() {
     count--;
     if (count === 0) {
-      renderSyncIndicator();
+      subscriber();
     }
   }
 
   return {
-    syncIndicatorDidMount,
+    subscribe,
     isSyncing,
     increment,
     decrement
