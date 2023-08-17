@@ -16,20 +16,3 @@ CREATE TABLE todos (
   value   text NOT NULL,
   created timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-
--- Create the default user.
-INSERT INTO users (id, name, password, version) 
-  VALUES (gen_random_uuid(), 'default', 'default', 0);
-
--- Get the default user ID, and insert a new todo with that user ID.
-INSERT INTO todos (id, user_id, value)
-  SELECT gen_random_uuid(), id, 'Todo A' FROM users WHERE name = 'default';
-
-INSERT INTO todos (id, user_id, value)
-  SELECT gen_random_uuid(), id, 'Todo B' FROM users WHERE name = 'default';
-
-INSERT INTO todos (id, user_id, value)
-  SELECT gen_random_uuid(), id, 'Todo C' FROM users WHERE name = 'default';
-
-INSERT INTO todos (id, user_id, value)
-  SELECT gen_random_uuid(), id, 'Todo D' FROM users WHERE name = 'default';

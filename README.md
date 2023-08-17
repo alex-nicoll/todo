@@ -1,6 +1,6 @@
 # todo
 
-todo is a to-do list web application. It supports creating, deleting, and updating elements of a large list, as well as signing in and out of user accounts. 
+todo is a to-do list web application. It supports creating, deleting, and updating elements of a large list, as well as creating and signing in and out of user accounts. 
 
 An initial goal of this exercise was to practice building web applications with scalablity and high availability in mind, while getting more experience with React, Go, and PostgreSQL.
 
@@ -25,4 +25,4 @@ openssl rand -base64 32
 postgres://postgres:<password>@<host>:5432/postgres 
 ```
 7. If using a cloud-managed database, you may need to allow connections from the web server. For example, I usually run the web server on a DigitalOcean droplet, and run the database on RDS. I needed to go into AWS EC2 Management Console > Network and Security > Security Groups, and add an inbound rule for the RDS instance's security group to allow traffic from the droplet's IP address.
-8. Run `./run.sh` to start the application, and connect to it on port 8080. E.g. https://localhost:8080. You can sign in with username `default` and password `default`. Currently, the only ways to create additional accounts are to modify `reset`, or use `psql` to insert into the `users` table.
+8. Run `./run.sh` to start the application, and connect to it on port 8080. E.g. https://localhost:8080.

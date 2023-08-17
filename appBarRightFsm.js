@@ -7,14 +7,14 @@ export function newAppBarRightFsm(dispatcher) {
 const emptyState = {
   tag: "empty",
   transitions: [
-    ["usernameLoaded", (e) => newAccountState(e.username)],
-    ["loggedIn", (e) => newAccountState(e.username)],
+    ["usernameLoaded", (e) => newUserState(e.username)],
+    ["loggedIn", (e) => newUserState(e.username)],
   ],
 };
 
-function newAccountState(username) {
+function newUserState(username) {
   return {
-    tag: "account",
+    tag: "user",
     transitions: [
       ["logoutClicked", (e) => emptyState],
     ],

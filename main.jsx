@@ -185,7 +185,7 @@ function AppBarRight({ fsm, apiUrl, dispatcher }) {
   if (state.tag === "empty") {
     return undefined;
   }
-  if (state.tag === "account") {
+  if (state.tag === "user") {
     return (
       <Box sx={{ display: "flex", alignItems: "center" }}>
         <Typography>
@@ -226,7 +226,7 @@ function Content({ fsm, apiUrl, dispatcher }) {
     );
   }
   if (state.tag === "login") {
-    return <LoginForm apiUrl={apiUrl} dispatcher={dispatcher} />;
+    return <LoginOrCreateUser apiUrl={apiUrl} dispatcher={dispatcher} />;
   }
   if (state.tag === "todos") {
     return <TodoList todoStore={state.todoStore} />
@@ -234,7 +234,41 @@ function Content({ fsm, apiUrl, dispatcher }) {
   throw new Error(`No render logic defined for state "${state.tag}"`);
 }
 
-function LoginForm({ apiUrl, dispatcher }) {
+function LoginOrCreateUser({ apiUrl, dispatcher }) {
+  console.log("rendering LoginOrCreateUser");
+
+  const [isLogin, setIsLogin] = React.useState(true);
+
+  function handleLoggedIn(username) {
+    dispatcher.dispatch({ id: "loggedIn", username });
+    loadTodos(apiUrl, dispatcher);
+  }
+
+  function handleError() {
+    dispatcher.dispatch({ id: "loginError" })
+  }
+
+  if (isLogin) {
+    return (
+      <LoginForm
+        apiUrl={apiUrl}
+        onShowCreateUserForm={() => setIsLogin(false)}
+        onLoggedIn={handleLoggedIn}
+        onError={handleError}
+      />
+    );
+  }
+  return (
+    <CreateUserForm
+      apiUrl={apiUrl}
+      onShowLoginForm={() => setIsLogin(true)}
+      onLoggedIn={handleLoggedIn}
+      onError={handleError}
+    />
+  );
+}
+
+function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError}) {
   console.log("rendering LoginForm");
 
   const [state, setState] = React.useState({
@@ -249,7 +283,7 @@ function LoginForm({ apiUrl, dispatcher }) {
     const { username, password } = state;
     const result = await callApi(apiUrl, "login", { username, password });
     if (result === "failed") {
-      dispatcher.dispatch({ id: "loginError" });
+      onError();
       return;
     }
     if (result.didLogin === false) {
@@ -257,8 +291,7 @@ function LoginForm({ apiUrl, dispatcher }) {
       setState({ ...state, isInvalid: true });
       return;
     }
-    dispatcher.dispatch({ id: "loggedIn", username });
-    loadTodos(apiUrl, dispatcher);
+    onLoggedIn(username);
   }
 
   const style = { margin: "10px 0" };
@@ -276,12 +309,25 @@ function LoginForm({ apiUrl, dispatcher }) {
         padding: "8px 0",
         display: "flex",
         flexDirection: "column",
-        alignItems: "center" 
       }}
     >
-      <Typography sx={style} variant="h5">
-        Sign in
-      </Typography>
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "row",
+        }}
+      >
+        <Box sx={{ flex: "1", display: "flex", justifyContent: "left" }}>
+          <Typography sx={style} variant="h5">
+            Sign in
+          </Typography>
+        </Box>
+        <Box sx={{ flex: "1", display: "flex", justifyContent: "right" }}>
+          <Button onClick={onShowCreateUserForm}>
+            Create account
+          </Button>
+        </Box>
+      </Box>
       <TextField
         sx={style}
         spellCheck={false}
@@ -310,6 +356,109 @@ function LoginForm({ apiUrl, dispatcher }) {
   );
 }
 
+function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError}) {
+  console.log("rendering CreateUserForm");
+
+  const [state, setState] = React.useState({
+    username: "",
+    password: "",
+    confirmPassword: "",
+    isCreatingUser: false,
+    isUsernameTaken: false,
+  });
+
+  async function createUser() {
+    setState({ ...state, isCreatingUser: true });
+    const { username, password } = state;
+    const result = await callApi(apiUrl, "createUser", { username, password });
+    if (result === "failed") {
+      onError();
+      return;
+    }
+    if (result.isNameTaken) {
+      setState({ ...state, isUsernameTaken: true });
+      return;
+    }
+    onLoggedIn(username);
+  }
+
+  let usernameProps;
+  if (state.isUsernameTaken) {
+    usernameProps = {
+      error: true,
+      helperText: "Username already taken.",
+    }
+  }
+  let passwordProps;
+  if (state.password !== state.confirmPassword) {
+    passwordProps = {
+      error: true,
+      helperText: "Passwords must match.",
+    }
+  }
+  const style = { margin: "10px 0" };
+  return (
+    <Box 
+      sx={{
+        padding: "8px 0",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Box
+        sx={{
+          display: "flex",
+          flexDirection: "row",
+        }}
+      >
+        <Box sx={{ flex: "1", display: "flex", justifyContent: "left" }}>
+          <Typography sx={style} variant="h5">
+            Create account
+          </Typography>
+        </Box>
+        <Box sx={{ flex: "1", display: "flex", justifyContent: "right" }}>
+          <Button onClick={onShowLoginForm}>
+            Sign in
+          </Button>
+        </Box>
+      </Box>
+      <TextField
+        sx={style}
+        spellCheck={false}
+        label="Username"
+        value={state.username}
+        onChange={(e) => setState({ ...state, username: e.target.value })}
+        {...usernameProps}
+      />
+      <TextField
+        sx={style}
+        spellCheck={false}
+        label="Password"
+        value={state.password}
+        onChange={(e) => setState({ ...state, password: e.target.value })}
+        type={"password"}
+        {...passwordProps}
+      />
+      <TextField
+        sx={style}
+        spellCheck={false}
+        label="Confirm password"
+        value={state.confirmPassword}
+        onChange={(e) => setState({ ...state, confirmPassword: e.target.value })}
+        type={"password"}
+        {...passwordProps}
+      />
+      <LoadingButton
+        sx={style}
+        disabled={state.username === "" || state.password === "" || state.confirmPassword === ""}
+        loading={state.isCreatingUser}
+        onClick={createUser}
+      >
+        Create account
+      </LoadingButton>
+    </Box>
+  );
+}
 function SyncText({ syncStore }) {
   console.log("rendering SyncText");
 

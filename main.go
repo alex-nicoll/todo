@@ -83,6 +83,11 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.serveGetUsername(w, r)
 		return
 	}
+	cur := &createUserRqst{}
+	if err := json.Unmarshal(body, cur); err == nil && cur.Operation == "createUser" {
+		h.serveCreateUser(w, cur)
+		return
+	}
 	gtr := &getTodosRqst{}
 	if err := json.Unmarshal(body, gtr); err == nil && gtr.Operation == "getTodos" {
 		withVerifyCookie(func(uid string) { h.serveGetTodos(w, uid) })(h, w, r)
@@ -136,7 +141,7 @@ func (h *apiHandler) verifyCookie(w http.ResponseWriter, r *http.Request) string
 // http.StatusInternalServerError is sent. Since the server is responsible for
 // generating the JWT in the first place, a potential server programming error
 // is indicated. There could be another cause (like a forgery attempt), but we
-// don't want to hide a programming error.
+// shouldn't hide programming errors.
 func (h *apiHandler) getUidFromJwt(w http.ResponseWriter, tokenString string) string {
 	token, err := jwt.Parse(
 		tokenString,
@@ -191,18 +196,10 @@ func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
 		writeJson(w, &loginResp{DidLogin: false})
 		return
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid})
-	signedString, err := token.SignedString(h.jwtSigningKey)
-	if err != nil {
-		log.Printf("Failed to sign jwt: %v", err)
+	if !h.login(w, uid) {
 		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     h.cookieName,
-		Value:    signedString,
-		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
-	})
 	writeJson(w, &loginResp{DidLogin: true})
 }
 
@@ -213,6 +210,22 @@ func getUidAndPwd(pool *pgxpool.Pool, name string) (uid string, pwd string, err 
 	row := pool.QueryRow(context.Background(), query, name)
 	err = row.Scan(&uid, &pwd)
 	return
+}
+
+func (h *apiHandler) login(w http.ResponseWriter, uid string) bool {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid})
+	signedString, err := token.SignedString(h.jwtSigningKey)
+	if err != nil {
+		log.Printf("Failed to sign jwt: %v", err)
+		return false
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     h.cookieName,
+		Value:    signedString,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	return true
 }
 
 func (h *apiHandler) serveGetUsername(w http.ResponseWriter, r *http.Request) {
@@ -255,6 +268,89 @@ func getUsername(pool *pgxpool.Pool, uid string) (name string, err error) {
 	query := "SELECT name FROM users WHERE id = $1"
 	row := pool.QueryRow(context.Background(), query, uid)
 	err = row.Scan(&name)
+	return
+}
+
+func (h *apiHandler) serveCreateUser(w http.ResponseWriter, r *createUserRqst) {
+	resp := h.txCreateUser(w, r)
+	if resp == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	writeJson(w, resp)
+}
+
+func (h *apiHandler) txCreateUser(w http.ResponseWriter, r *createUserRqst) *createUserResp {
+	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
+		IsoLevel:       pgx.Serializable,
+		AccessMode:     pgx.ReadWrite,
+		DeferrableMode: pgx.NotDeferrable,
+	})
+	// Rollback is a no-op if the transaction is already committed/aborted.
+	defer tx.Rollback(context.Background())
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		return nil
+	}
+	exists, ok := checkUsername(tx, r.Username)
+	if !ok {
+		return nil
+	}
+	if exists {
+		return &createUserResp{IsNameTaken: true}
+	}
+	uid := createUser(tx, r.Username, r.Password)
+	if uid == "" {
+		return nil
+	}
+	if !h.login(w, uid) {
+		return nil
+	}
+	err = tx.Commit(context.Background())
+	if err != nil {
+		log.Printf("Failed to commit transaction: %v", err)
+		return nil
+	}
+	return &createUserResp{IsNameTaken: false}
+}
+
+// checkUsername checks whether the given username exists. If an error occurs,
+// checkUsername logs the error and sets ok to false.
+func checkUsername(tx pgx.Tx, name string) (exists bool, ok bool) {
+	query := "SELECT FROM users WHERE name = $1"
+	row := tx.QueryRow(context.Background(), query, name)
+	err := row.Scan()
+	if err == pgx.ErrNoRows {
+		exists = false
+		ok = true
+		return
+	}
+	if err != nil {
+		log.Printf("Failed to test existence of username \"%v\": %v",
+			name, err)
+		return
+	}
+	exists = true
+	ok = true
+	return
+}
+
+func createUser(tx pgx.Tx, name string, pwd string) (uid string) {
+	uid = uuid.NewString()
+	cmd := "INSERT INTO users (id, name, password, version) VALUES ($1, $2, $3, 0)"
+	ct, err := tx.Exec(context.Background(), cmd, uid, name, pwd)
+	if err != nil {
+		log.Printf("Failed to create user with UID %v: %v", uid, err)
+		uid = ""
+		return
+	}
+	rowsAffected := ct.RowsAffected()
+	if rowsAffected != 1 {
+		log.Printf("Failed to create user with UID %v. Unexpected number "+
+			"of rows affected (%v)", uid, rowsAffected)
+		uid = ""
+		return
+	}
 	return
 }
 

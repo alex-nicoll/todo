@@ -11,6 +11,8 @@ type loginRqst struct {
 }
 
 type loginResp struct {
+	// true if login succeeded
+	// false if credentials invalid
 	DidLogin bool `json:"didLogin"`
 }
 
@@ -25,6 +27,18 @@ type getUsernameRqst struct {
 
 type getUsernameResp struct {
 	Username string `json:"username"`
+}
+
+type createUserRqst struct {
+	Operation string `json:"operation"`
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+}
+
+type createUserResp struct {
+	// true if the username already exists
+	// false if the user was created and the client is now logged in
+	IsNameTaken bool `json:"isNameTaken"`
 }
 
 type getTodosRqst struct {
