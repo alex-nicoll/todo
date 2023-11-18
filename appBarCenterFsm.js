@@ -15,7 +15,7 @@ function newSyncState(syncStore) {
   return {
     tag: "sync",
     transitions: [
-      ["logoutClicked", (e) => emptyState],
+      ["logoutClicked", () => emptyState],
     ],
     syncStore,
   };

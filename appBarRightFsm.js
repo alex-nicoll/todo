@@ -16,7 +16,7 @@ function newUserState(username) {
   return {
     tag: "user",
     transitions: [
-      ["logoutClicked", (e) => emptyState],
+      ["logoutClicked", () => emptyState],
     ],
     username,
   };

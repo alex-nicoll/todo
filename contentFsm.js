@@ -7,9 +7,9 @@ export function newContentFsm(dispatcher) {
 const loadingUsernameState = {
   tag: "loadingUsername",
   transitions: [
-    ["usernameLoaded", (e) => loadingTodosState],
-    ["usernameNotLoaded", (e) => loginState],
-    ["getUsernameError", (e) => errorState],
+    ["usernameLoaded", () => loadingTodosState],
+    ["usernameNotLoaded", () => loginState],
+    ["getUsernameError", () => errorState],
   ],
 };
 
@@ -17,16 +17,16 @@ const loadingTodosState = {
   tag: "loadingTodos",
   transitions: [
     ["todosLoaded", (e) => newTodosState(e.todoStore)],
-    ["logoutClicked", (e) => loggingOutState],
-    ["getTodosError", (e) => errorState],
+    ["logoutClicked", () => loggingOutState],
+    ["getTodosError", () => errorState],
   ],
 };
 
 const loginState = {
   tag: "login",
   transitions: [
-    ["loggedIn", (e) => loadingTodosState],
-    ["loginError", (e) => errorState],
+    ["loggedIn", () => loadingTodosState],
+    ["loginError", () => errorState],
   ],
 };
 
@@ -39,8 +39,8 @@ function newTodosState(todoStore) {
   return {
     tag: "todos",
     transitions: [
-      ["logoutClicked", (e) => loggingOutState],
-      ["syncError", (e) => errorState],
+      ["logoutClicked", () => loggingOutState],
+      ["syncError", () => errorState],
     ],
     todoStore,
   };
@@ -49,7 +49,7 @@ function newTodosState(todoStore) {
 const loggingOutState = {
   tag: "loggingOut",
   transitions: [
-    ["loggedOut", (e) => loginState],
-    ["logoutError", (e) => errorState],
+    ["loggedOut", () => loginState],
+    ["logoutError", () => errorState],
   ],
 };
