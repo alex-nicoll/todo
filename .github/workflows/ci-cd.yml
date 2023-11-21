@@ -1,0 +1,30 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+
+  build-and-deploy:
+    name: Build, push, and deploy application image
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build image
+      run: ./build.sh ${{ vars.AWS_IMAGE_URI }}
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1
+    - name: Login to AWS ECR public
+      uses: aws-actions/amazon-ecr-login@v2
+      with:
+        registry-type: public
+    - name: Push image to AWS ECR
+      run: docker push ${{ vars.AWS_IMAGE_URI }}
+    - name: Deploy with AWS App Runner
+      run: aws apprunner start-deployment --service-arn ${{ vars.AWS_SERVICE_ARN }}
