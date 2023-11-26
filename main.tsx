@@ -23,13 +23,15 @@ import { createTheme, ThemeProvider } from "@mui/material/styles";
 import Add from "@mui/icons-material/Add";
 import Clear from "@mui/icons-material/Clear";
 import Logout from "@mui/icons-material/Logout";
-import { callApi, callApiNoParse } from "./api.js";
-import { newAppBarCenterFsm } from "./appBarCenterFsm.js";
-import { newAppBarRightFsm } from "./appBarRightFsm.js";
-import { newContentFsm } from "./contentFsm.js";
-import { newDispatcher } from "./dispatcher.js";
-import { newTodosMap, newTodoStore } from "./todoStore.js";
-import { newSyncStore } from "./syncStore.js";
+import { callApi, callApiNoParse } from "./api";
+import { AppBarCenterFsm, AppBarCenterStateTag, newAppBarCenterFsm } from "./appBarCenterFsm";
+import { AppBarRightFsm, AppBarRightStateTag, newAppBarRightFsm } from "./appBarRightFsm";
+import { ContentFsm, ContentStateTag, newContentFsm } from "./contentFsm";
+import { Dispatcher, newDispatcher } from "./dispatcher";
+import { newTodosMap, newTodoStore, TodoStore } from "./todoStore";
+import { SyncStore, newSyncStore } from "./syncStore";
+import { ActionTag } from "./actions";
+import { Fsm } from "./fsm";
 
 init();
 
@@ -40,7 +42,7 @@ function init() {
   const appBarRightFsm = newAppBarRightFsm(dispatcher);
   const contentFsm = newContentFsm(dispatcher);
   loadInitialState(apiUrl, dispatcher);
-  const root = ReactDOM.createRoot(document.getElementById("root"));
+  const root = ReactDOM.createRoot(document.getElementById("root")!);
   root.render(
     <AppBarAndContent
       apiUrl={apiUrl}
@@ -52,25 +54,25 @@ function init() {
   );
 }
 
-async function loadInitialState(apiUrl, dispatcher) {
+async function loadInitialState(apiUrl: string, dispatcher: Dispatcher) {
   const result = await callApi(apiUrl, "getUsername");
   if (result === "failed") {
-    dispatcher.dispatch({ id: "getUsernameError" });
+    dispatcher.dispatch({ tag: ActionTag.GetUsernameError});
     return;
   }
   const { username } = result;
   if (username === "") {
-    dispatcher.dispatch({ id: "usernameNotLoaded" });
+    dispatcher.dispatch({ tag: ActionTag.UsernameNotLoaded });
     return;
   }
-  dispatcher.dispatch({ id: "usernameLoaded", username });
+  dispatcher.dispatch({ tag: ActionTag.UsernameLoaded, username });
   loadTodos(apiUrl, dispatcher);
 }
 
-async function loadTodos(apiUrl, dispatcher) {
+async function loadTodos(apiUrl: string, dispatcher: Dispatcher) {
   const result = await callApi(apiUrl, "getTodos");
   if (result === "failed") {
-    dispatcher.dispatch({ id: "getTodosError" });
+    dispatcher.dispatch({ tag: ActionTag.GetTodosError });
     return;
   }
   const { version, todos } = result;
@@ -83,11 +85,19 @@ async function loadTodos(apiUrl, dispatcher) {
     todos: newTodosMap(todos),
   });
   dispatcher.dispatch({
-    id: "todosLoaded",
+    tag: ActionTag.TodosLoaded,
     todoStore,
     syncStore,
   });
 }
+
+type AppBarAndContentProps = {
+  apiUrl: string;
+  dispatcher: Dispatcher;
+  appBarCenterFsm: AppBarCenterFsm;
+  appBarRightFsm: AppBarRightFsm;
+  contentFsm: ContentFsm;
+};
 
 function AppBarAndContent({
   apiUrl,
@@ -95,7 +105,7 @@ function AppBarAndContent({
   appBarCenterFsm,
   appBarRightFsm,
   contentFsm,
-}) {
+}: AppBarAndContentProps) {
   const theme = createTheme({
     palette: {
       primary: indigo,
@@ -108,13 +118,13 @@ function AppBarAndContent({
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AppBar
-          sx={{
-            height: appBarHeight,
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "center",
-            padding: "0 5%"
-          }}
+        sx={{
+          height: appBarHeight,
+          display: "flex",
+          flexDirection: "row",
+          alignItems: "center",
+          padding: "0 5%"
+        }}
       >
         <Box sx={{ flex: "1", display: "flex", justifyContent: "left" }}>
           <Typography variant="h4" component="h1">
@@ -139,24 +149,28 @@ function AppBarAndContent({
   );
 }
 
-function useSubscribeToFsm(fsm) {
-  const [_, setState] = React.useState({});
+function useSubscribeToFsm(fsm: Fsm) {
+  const [, setState] = React.useState({});
   React.useEffect(
     () => fsm.subscribe(() => setState({})),
     []
   );
 }
 
-function AppBarCenter({ fsm }) {
+type AppBarCenterProps = {
+  fsm: AppBarCenterFsm;
+};
+
+function AppBarCenter({ fsm }: AppBarCenterProps) {
   console.log("rendering AppBarCenter");
 
   useSubscribeToFsm(fsm);
 
   const state = fsm.getState();
-  if (state.tag === "empty") {
+  if (state.tag === AppBarCenterStateTag.Empty) {
     return undefined;
   }
-  if (state.tag === "sync") {
+  if (state.tag === AppBarCenterStateTag.Sync) {
     return (
       <Typography>
         <SyncText syncStore={state.syncStore} />
@@ -166,26 +180,32 @@ function AppBarCenter({ fsm }) {
   throw new Error(`No render logic defined for state "${state.tag}"`);
 }
 
-function AppBarRight({ fsm, apiUrl, dispatcher }) {
+type AppBarRightProps = {
+  fsm: AppBarRightFsm;
+  apiUrl: string;
+  dispatcher: Dispatcher;
+};
+
+function AppBarRight({ fsm, apiUrl, dispatcher }: AppBarRightProps) {
   console.log("rendering AppBarRight");
 
   useSubscribeToFsm(fsm);
 
   async function logout() {
-    dispatcher.dispatch({ id: "logoutClicked" });
+    dispatcher.dispatch({ tag: ActionTag.LogoutClicked });
     const result = await callApiNoParse(apiUrl, "logout");
     if (result === "failed") {
-      dispatcher.dispatch({ id: "logoutError" });
+      dispatcher.dispatch({ tag: ActionTag.LogoutError });
       return;
     }
-    dispatcher.dispatch({ id: "loggedOut" });
+    dispatcher.dispatch({ tag: ActionTag.LoggedOut });
   }
 
   const state = fsm.getState();
-  if (state.tag === "empty") {
+  if (state.tag === AppBarRightStateTag.Empty) {
     return undefined;
   }
-  if (state.tag === "user") {
+  if (state.tag === AppBarRightStateTag.User) {
     return (
       <Box sx={{ display: "flex", alignItems: "center" }}>
         <Typography>
@@ -200,22 +220,28 @@ function AppBarRight({ fsm, apiUrl, dispatcher }) {
   throw new Error(`No render logic defined for state "${state.tag}"`);
 }
 
-function Content({ fsm, apiUrl, dispatcher }) {
+type ContentProps = { 
+  fsm: ContentFsm;
+  apiUrl: string;
+  dispatcher: Dispatcher;
+};
+
+function Content({ fsm, apiUrl, dispatcher }: ContentProps) {
   console.log("rendering Content");
 
   useSubscribeToFsm(fsm);
 
   const state = fsm.getState();
-  if (state.tag === "loadingUsername" ||
-    state.tag === "loadingTodos" ||
-    state.tag === "loggingOut") {
+  if (state.tag === ContentStateTag.LoadingUsername ||
+    state.tag === ContentStateTag.LoadingTodos ||
+    state.tag === ContentStateTag.LoggingOut) {
     return (
       <Box sx={{ padding: "24px 0", display: "flex", justifyContent: "center" }}>
         <CircularProgress />
       </Box>
     );
   }
-  if (state.tag === "error") {
+  if (state.tag === ContentStateTag.Error) {
     return (
       <Box sx={{ padding: "16px 0" }}>
         <Alert severity="error">
@@ -225,27 +251,32 @@ function Content({ fsm, apiUrl, dispatcher }) {
       </Box>
     );
   }
-  if (state.tag === "login") {
+  if (state.tag === ContentStateTag.Login) {
     return <LoginOrCreateUser apiUrl={apiUrl} dispatcher={dispatcher} />;
   }
-  if (state.tag === "todos") {
+  if (state.tag === ContentStateTag.Todos) {
     return <TodoList todoStore={state.todoStore} />
   }
   throw new Error(`No render logic defined for state "${state.tag}"`);
 }
 
-function LoginOrCreateUser({ apiUrl, dispatcher }) {
+type LoginOrCreateUserProps = {
+  apiUrl: string;
+  dispatcher: Dispatcher;
+};
+
+function LoginOrCreateUser({ apiUrl, dispatcher }: LoginOrCreateUserProps) {
   console.log("rendering LoginOrCreateUser");
 
   const [isLogin, setIsLogin] = React.useState(true);
 
-  function handleLoggedIn(username) {
-    dispatcher.dispatch({ id: "loggedIn", username });
+  function handleLoggedIn(username: string) {
+    dispatcher.dispatch({ tag: ActionTag.LoggedIn, username });
     loadTodos(apiUrl, dispatcher);
   }
 
   function handleError() {
-    dispatcher.dispatch({ id: "loginError" })
+    dispatcher.dispatch({ tag: ActionTag.LoginError })
   }
 
   if (isLogin) {
@@ -268,7 +299,14 @@ function LoginOrCreateUser({ apiUrl, dispatcher }) {
   );
 }
 
-function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError}) {
+type LoginFormProps = {
+  apiUrl: string;
+  onShowCreateUserForm: () => void;
+  onLoggedIn: (username: string) => void;
+  onError: () => void;
+};
+
+function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError }: LoginFormProps) {
   console.log("rendering LoginForm");
 
   const [state, setState] = React.useState({
@@ -356,7 +394,14 @@ function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError}) {
   );
 }
 
-function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError}) {
+type CreateUserFormProps = {
+  apiUrl: string;
+  onShowLoginForm: () => void;
+  onLoggedIn: (username: string) => void;
+  onError: () => void;
+};
+
+function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError }: CreateUserFormProps) {
   console.log("rendering CreateUserForm");
 
   const [state, setState] = React.useState({
@@ -459,10 +504,15 @@ function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError}) {
     </Box>
   );
 }
-function SyncText({ syncStore }) {
+
+type SyncTextProps = {
+  syncStore: SyncStore;
+};
+
+function SyncText({ syncStore }: SyncTextProps) {
   console.log("rendering SyncText");
 
-  const [_, setState] = React.useState({});
+  const [, setState] = React.useState({});
   React.useEffect(
     () => syncStore.subscribe(() => setState({})),
     []
@@ -471,16 +521,20 @@ function SyncText({ syncStore }) {
   return syncStore.isSyncing() ? "Syncing..." : undefined;
 }
 
-function TodoList({ todoStore }) {
+type TodoListProps = {
+  todoStore: TodoStore;
+};
+
+function TodoList({ todoStore }: TodoListProps) {
   console.log("rendering TodoList");
 
-  const [_, setState] = React.useState({});
+  const [, setState] = React.useState({});
   React.useEffect(
     () => todoStore.subscribeToKeys(() => setState({})),
     []
   );
 
-  let todoListItems = [];
+  const todoListItems: React.JSX.Element[] = [];
   todoStore.getTodos().forEach((value, id) => todoListItems.push(
     <ListItem key={id}>
       <TodoTextField
@@ -506,10 +560,15 @@ function TodoList({ todoStore }) {
   );
 }
 
-function TodoTextField({ todoId, todoStore }) {
+type TodoTextFieldProps = {
+  todoId: string;
+  todoStore: TodoStore;
+};
+
+function TodoTextField({ todoId, todoStore }: TodoTextFieldProps) {
   console.log("rendering TodoTextField");
 
-  const [_, setState] = React.useState({});
+  const [, setState] = React.useState({});
   React.useEffect(
     () => todoStore.subscribeToValue(todoId, () => setState({})),
     []

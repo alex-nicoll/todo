@@ -2,7 +2,7 @@
 // encoding of args with operation merged in. callApi checks the status code
 // and parses the response body as JSON. If an error is encountered, it returns
 // "failed". Otherwise, it returns the parsed response body.
-export async function callApi(apiUrl, operation, args) {
+export async function callApi(apiUrl: string, operation: string, args?: object) {
   const resp = await callApiNoParse(apiUrl, operation, args);
   if (resp === "failed") {
     return "failed";
@@ -20,7 +20,7 @@ export async function callApi(apiUrl, operation, args) {
 
 // callApiNoParse is like callApi, except it doesn't try to parse the response
 // body as JSON. If no error is encountered, it returns a Response object.
-export async function callApiNoParse(apiUrl, operation, args) {
+export async function callApiNoParse(apiUrl: string, operation: string, args?: object) {
   const options = {
     method: "POST",
     body: JSON.stringify({ operation, ...args })

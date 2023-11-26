@@ -1,15 +1,18 @@
-FROM node:21.2.0-alpine3.17 AS js-base
+FROM node:21.2.0-alpine3.17 AS ts-base
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm clean-install
-COPY *.js *.jsx ./
+COPY tsconfig.json *.ts *.tsx ./
 
-FROM js-base AS js-lint
+FROM ts-base AS ts-check
+RUN npx tsc --noEmit
+
+FROM ts-base AS ts-lint
 COPY .eslintrc.json ./
 RUN npx eslint ./
 
-FROM js-base AS js-build
-RUN npx esbuild main.jsx --bundle --minify --outfile=/out/main.js
+FROM ts-base AS ts-build
+RUN npx esbuild main.tsx --bundle --minify --outfile=/out/main.js
 
 FROM golang:1.20.11-bullseye AS go-base
 # Disable CGO to produce statically linked executables.
@@ -38,6 +41,6 @@ go build -o /out/server .
 FROM scratch AS bin
 WORKDIR /app
 COPY main.html ./
-COPY --from=js-build /out/main.js ./
+COPY --from=ts-build /out/main.js ./
 COPY --from=go-build /out/server ./
 ENTRYPOINT ["/app/server"]

@@ -1,16 +1,18 @@
+export type SyncStore = ReturnType<typeof newSyncStore>;
+
 // SyncStore contains the state of the sync indicator.
 export function newSyncStore() {
 
   // count is the number of synchronization operations in progress.
   let count = 0;
 
-  let subscriber;
+  let subscriber: (() => void) | undefined;
 
   // subscribe registers a callback to be invoked whenever the return value of
   // isSyncing() changes. At most one callback may be registered.
   //
   // subscribe returns a function that unregisters the callback.
-  function subscribe(callback) {
+  function subscribe(callback: () => void) {
     subscriber = callback;
     return () => subscriber = undefined;
   }
@@ -25,7 +27,7 @@ export function newSyncStore() {
   function increment() {
     count++;
     if (count === 1) {
-      subscriber();
+      subscriber!();
     }
   }
 
@@ -33,7 +35,7 @@ export function newSyncStore() {
   function decrement() {
     count--;
     if (count === 0) {
-      subscriber();
+      subscriber!();
     }
   }
 
