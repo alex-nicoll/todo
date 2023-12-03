@@ -13,7 +13,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Build image
-      run: ./build.sh ${{ vars.AWS_IMAGE_URI }}
+      run: ./build.sh "-t ${{ vars.AWS_IMAGE_URI }}"
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
