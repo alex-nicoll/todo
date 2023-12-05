@@ -20,9 +20,11 @@ export function newFsm<S>(initialState: S, transition: (state: S, action: Action
     return state;
   }
 
-  // subscribe registers a callback to be invoked whenever the value of
-  // getState() changes. At most one callback may be registered.
-  // subscribe returns a function that unregisters the callback.
+  /**
+   * subscribe registers a callback to be invoked whenever the value of
+   * {@link getState()} changes. At most one callback may be registered.
+   * subscribe returns a function that unregisters the callback.
+   */
   function subscribe(callback: () => void) {
     subscriber = callback;
     return () => subscriber = undefined;
