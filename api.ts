@@ -1,7 +1,9 @@
-// callApi initiates a POST request to apiUrl. The request body is the JSON
-// encoding of args with operation merged in. callApi checks the status code
-// and parses the response body as JSON. If an error is encountered, it returns
-// "failed". Otherwise, it returns the parsed response body.
+/**
+ * callApi initiates a POST request to apiUrl. The request body is the JSON
+ * encoding of args with operation merged in. callApi checks the status code
+ * and parses the response body as JSON. If an error is encountered, it returns
+ * "failed". Otherwise, it returns the parsed response body.
+ */
 export async function callApi(apiUrl: string, operation: string, args?: object) {
   const resp = await callApiNoParse(apiUrl, operation, args);
   if (resp === "failed") {
@@ -18,8 +20,10 @@ export async function callApi(apiUrl: string, operation: string, args?: object) 
   return v;
 }
 
-// callApiNoParse is like callApi, except it doesn't try to parse the response
-// body as JSON. If no error is encountered, it returns a Response object.
+/**
+ * callApiNoParse is like {@link callApi}, except it doesn't try to parse the response
+ * body as JSON. If no error is encountered, it returns a Response object.
+ */
 export async function callApiNoParse(apiUrl: string, operation: string, args?: object) {
   const options = {
     method: "POST",

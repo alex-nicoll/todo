@@ -2,10 +2,10 @@ import { SyncStore } from "./syncStore";
 import { TodoStore } from "./todoStore";
 
 /**
- * An Action represents something that has happened, which, when dispatched, may
- * trigger a change in application state. A better name might have been "Event",
- * but that name is already used to refer to DOM events. Actions are similar to
- * input symbols in the context of finite state machines.
+ * An Action represents something that has happened. When an Action is
+ * dispatched, the application may change state. A better name might have been
+ * "Event", but that name is already used to refer to DOM events. Actions are
+ * similar to input symbols in the context of finite state machines.
  */
 export type Action =  BasicAction | ComplexAction;
 
@@ -13,7 +13,7 @@ type BasicAction = { tag: Exclude<ActionTag, ComplexAction["tag"]> }
 
 type ComplexAction = TodosLoaded | LoggedIn | UsernameLoaded;
 
-/** An ActionTag identifies a type of action. */
+/** An ActionTag identifies a kind of {@link Action}. */
 export enum ActionTag {
   GetUsernameError,
   GetTodosError,

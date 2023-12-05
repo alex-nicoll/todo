@@ -6,11 +6,15 @@ import { SyncStore } from "./syncStore";
 export type TodoStoreArgs = {
   /** The URL with which API calls should be executed */
   apiUrl: string;
-  /** The Dispatcher through which {@link ActionTag.SyncError} actions will be
-   * dispatched */
+  /** 
+   * The Dispatcher through which {@link ActionTag.SyncError} actions will be
+   * dispatched 
+   */
   dispatcher: Dispatcher;
-  /** The SyncStore associated with this TodoStore. It will be incremented and
-   * decremented when appropriate. */
+  /**
+   * The {@link SyncStore} associated with this TodoStore. It will be
+   * incremented and decremented when appropriate.
+   */
   syncStore: SyncStore;
   /** The initial todo list version */
   version: number;
@@ -27,40 +31,49 @@ export type TodoStore = ReturnType<typeof newTodoStore>;
  * TodoStore also solves the problem of having the text field associated with
  * each todo render independently, which improves performance when typing.
  * I.e., when the user types, only the text field that they are typing into
- * renders - not the entire todo list. This can be achieved by having text
- * field React components call subscribeToValue in an effect. A list component,
- * on the other hand, might call subscribeToKeys in an effect.
+ * renders - not the entire todo list. This can be achieved by having text field
+ * React components call {@link subscribeToValue} in an effect. A list
+ * component, on the other hand, might call {@link subscribeToKeys} in an
+ * effect.
  */
 export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: TodoStoreArgs) {
 
-  // lastTask is a queue of tasks implemented as a Promise chain.
-  // It allows operations to be performed serially so that each request
-  // contains the correct todo list version.
+  /**
+   * lastTask is a queue of tasks implemented as a Promise chain.
+   * It allows operations to be performed serially so that each request contains
+   * the correct todo list version.
+   */
   let lastTask = Promise.resolve();
 
-  // todosUpdating is the set of todo IDs for which there are pending update
-  // operations.
+  /**
+   * todosUpdating is the set of todo IDs for which there are pending update
+   * operations.
+   */
   const todosUpdating = new Set<string>();
 
   let keySubscriber: (() => void) | undefined;
 
   const mapValueSubscribers = new Map<string, () => void>();
 
-  // subscribeToKeys registers a callback to be invoked whenever the todo IDs
-  // (keys of the map returned by getTodos) change, but not when the todo
-  // values change. At most one callback may be registered.
-  //
-  // subscribeToKeys returns a function that unregisters the callback.
+  /**
+   * subscribeToKeys registers a callback to be invoked whenever the todo IDs
+   * (keys of the map returned by {@link getTodos}) change, but not when the
+   * todo values change. At most one callback may be registered.
+   *
+   * subscribeToKeys returns a function that unregisters the callback.
+   */
   function subscribeToKeys(callback: () => void) {
     keySubscriber = callback;
     return () => keySubscriber = undefined;
   }
 
-  // subscribeToValue registers a callback to be invoked whenever the value
-  // associated with the given todo ID changes. At most one callback may be
-  // registered per todo ID.
-  //
-  // subscribeToValue returns a function that unregisters the callback.
+  /**
+   * subscribeToValue registers a callback to be invoked whenever the value
+   * associated with the given todo ID changes. At most one callback may be
+   * registered per todo ID.
+   *
+   * subscribeToValue returns a function that unregisters the callback.
+   */
   function subscribeToValue(id: string, callback: () => void) {
     mapValueSubscribers.set(id, callback);
     return () => {
@@ -69,7 +82,7 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: 
     }
   }
 
-  // getTodos returns a map from todo ID to todo value. 
+  /** getTodos returns a map from todo ID to todo value. */
   function getTodos() {
     return todos;
   }
@@ -114,9 +127,11 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: 
     keySubscriber!();
   }
 
-  // enqueue adds a potentially async function to the back of the task queue. It
-  // returns a Promise representing the function's result.
-  // While the task is queued or executing, the sync count is increased by one.
+  /**
+   * enqueue adds a potentially async function to the back of the task queue. It
+   * returns a Promise representing the function's result.
+   * While the task is queued or executing, the sync count is increased by one.
+   */
   function enqueue<T>(task: () => (T | Promise<T>)) {
     syncStore.increment();
     const result = lastTask.then(task);
@@ -124,16 +139,18 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: 
     return result;
   }
 
-  // callApiWithVersion calls the API and partially handles the response. It
-  // includes the current todo list version in the request, and updates the
-  // current version to match the version in the response.
-  //
-  // It returns "done" if the request failed, or if the request succeeded and
-  // the todo list has been downloaded and rerendered due to a version mismatch
-  // detected by the server. If the request failed, a sync error event is
-  // dispatched.
-  //
-  // Otherwise, it returns the response body parsed as JSON.
+  /**
+   * callApiWithVersion calls the API and partially handles the response. It
+   * includes the current todo list version in the request, and updates the
+   * current version to match the version in the response.
+   *
+   * It returns "done" if the request failed, or if the request succeeded and
+   * the todo list has been downloaded and rerendered due to a version mismatch
+   * detected by the server. If the request failed, a sync error event is
+   * dispatched.
+   *
+   * Otherwise, it returns the response body parsed as JSON.
+   */
   async function callApiWithVersion(operation: string, args?: object) {
     const result = await callApi(apiUrl, operation, { version, ...args });
     if (result === "failed") {
