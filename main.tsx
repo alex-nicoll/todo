@@ -1,5 +1,6 @@
-import * as React from "react";
-import * as ReactDOM from "react-dom/client";
+import Add from "@mui/icons-material/Add";
+import Clear from "@mui/icons-material/Clear";
+import Logout from "@mui/icons-material/Logout";
 import { LoadingButton } from "@mui/lab";
 import {
   Alert,
@@ -18,29 +19,28 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { indigo, cyan } from '@mui/material/colors';
-import { createTheme, ThemeProvider } from "@mui/material/styles";
-import Add from "@mui/icons-material/Add";
-import Clear from "@mui/icons-material/Clear";
-import Logout from "@mui/icons-material/Logout";
-import { callApi, callApiNoParse } from "./api";
-import { AppBarCenterFsm, AppBarCenterStateTag, newAppBarCenterFsm } from "./appBarCenterFsm";
-import { AppBarRightFsm, AppBarRightStateTag, newAppBarRightFsm } from "./appBarRightFsm";
-import { ContentFsm, ContentStateTag, newContentFsm } from "./contentFsm";
-import { Dispatcher, newDispatcher } from "./dispatcher";
-import { newTodosMap, newTodoStore, TodoStore } from "./todoStore";
-import { SyncStore, newSyncStore } from "./syncStore";
+import { cyan, indigo } from '@mui/material/colors';
+import { ThemeProvider, createTheme } from "@mui/material/styles";
+import * as React from "react";
+import * as ReactDOM from "react-dom/client";
 import { ActionTag } from "./actions";
-import { Fsm } from "./fsm";
+import { callApi, callApiNoParse } from "./api";
+import { AppBarCenterFsm, StateTag as AppBarCenterStateTag, newAppBarCenterFsm } from "./appBarCenterFsm";
+import { AppBarRightFsm, StateTag as AppBarRightStateTag, newAppBarRightFsm } from "./appBarRightFsm";
+import { assertNever } from "./assertNever";
+import { ContentFsm, StateTag as ContentStateTag, newContentFsm } from "./contentFsm";
+import { Dispatcher, newDispatcher } from "./dispatcher";
+import { SyncStore, newSyncStore } from "./syncStore";
+import { TodoStore, newTodoStore, newTodosMap } from "./todoStore";
 
 init();
 
 function init() {
   const apiUrl = `${document.location.origin}/api`;
-  const dispatcher = newDispatcher();
-  const appBarCenterFsm = newAppBarCenterFsm(dispatcher);
-  const appBarRightFsm = newAppBarRightFsm(dispatcher);
-  const contentFsm = newContentFsm(dispatcher);
+  const appBarCenterFsm = newAppBarCenterFsm();
+  const appBarRightFsm = newAppBarRightFsm();
+  const contentFsm = newContentFsm();
+  const dispatcher = newDispatcher(appBarCenterFsm, appBarRightFsm, contentFsm);
   loadInitialState(apiUrl, dispatcher);
   const root = ReactDOM.createRoot(document.getElementById("root")!);
   root.render(
@@ -149,7 +149,9 @@ function AppBarAndContent({
   );
 }
 
-function useSubscribeToFsm(fsm: Fsm) {
+// useSubscribeToFsm causes the calling Component to re-render whenever the
+// given Fsm's state changes.
+function useSubscribeToFsm(fsm: AppBarCenterFsm | AppBarRightFsm | ContentFsm) {
   const [, setState] = React.useState({});
   React.useEffect(
     () => fsm.subscribe(() => setState({})),
@@ -177,7 +179,7 @@ function AppBarCenter({ fsm }: AppBarCenterProps) {
       </Typography>
     );
   }
-  throw new Error(`No render logic defined for state "${state.tag}"`);
+  assertNever(state);
 }
 
 type AppBarRightProps = {
@@ -217,7 +219,7 @@ function AppBarRight({ fsm, apiUrl, dispatcher }: AppBarRightProps) {
       </Box>
     );
   }
-  throw new Error(`No render logic defined for state "${state.tag}"`);
+  assertNever(state);
 }
 
 type ContentProps = { 
@@ -257,7 +259,7 @@ function Content({ fsm, apiUrl, dispatcher }: ContentProps) {
   if (state.tag === ContentStateTag.Todos) {
     return <TodoList todoStore={state.todoStore} />
   }
-  throw new Error(`No render logic defined for state "${state.tag}"`);
+  assertNever(state);
 }
 
 type LoginOrCreateUserProps = {
