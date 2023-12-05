@@ -1,34 +1,41 @@
-import { Action, ActionTag, TodosLoaded } from "./actions";
-import { Dispatcher } from "./dispatcher";
+import { Action, ActionTag } from "./actions";
+import { assertNever } from "./assertNever";
 import { newFsm } from "./fsm";
 import { SyncStore } from "./syncStore";
 
 export type AppBarCenterFsm = ReturnType<typeof newAppBarCenterFsm>;
 
-export function newAppBarCenterFsm(dispatcher: Dispatcher) {
-  return newFsm(dispatcher, emptyState);
+export function newAppBarCenterFsm() {
+  return newFsm(emptyState, transition);
 }
 
-export enum AppBarCenterStateTag {
-  Empty,
-  Sync
-}
+export enum StateTag { Empty, Sync }
 
-export type AppBarCenterState = typeof emptyState | ReturnType<typeof newSyncState>;
+type State = typeof emptyState | ReturnType<typeof newSyncState>;
 
-const emptyState = {
-  tag: AppBarCenterStateTag.Empty,
-  transitions: [
-    [ActionTag.TodosLoaded, (a: Action) => newSyncState((a as TodosLoaded).syncStore)],
-  ],
-} as const;
+const emptyState = { tag: StateTag.Empty } as const;
 
 function newSyncState(syncStore: SyncStore) {
-  return {
-    tag: AppBarCenterStateTag.Sync,
-    transitions: [
-      [ActionTag.LogoutClicked, () => emptyState],
-    ],
-    syncStore,
-  } as const;
+  return { tag: StateTag.Sync, syncStore } as const;
+}
+
+export function transition(state: State, action: Action): State | undefined {
+  switch (state.tag) {
+    case StateTag.Empty:
+
+      switch (action.tag) {
+        case ActionTag.TodosLoaded: return newSyncState(action.syncStore);
+      }
+
+      break;
+    case StateTag.Sync:
+
+      switch (action.tag) {
+        case ActionTag.LogoutClicked: return emptyState;
+      }
+
+      break;
+    default: assertNever(state);
+  }
+  return undefined;
 }

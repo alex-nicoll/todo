@@ -1,34 +1,41 @@
-import { Action, ActionTag, LoggedIn, UsernameLoaded } from "./actions";
-import type { Dispatcher } from "./dispatcher";
+import { Action, ActionTag } from "./actions";
+import { assertNever } from "./assertNever";
 import { newFsm } from "./fsm";
 
 export type AppBarRightFsm = ReturnType<typeof newAppBarRightFsm>;
 
-export function newAppBarRightFsm(dispatcher: Dispatcher) {
-  return newFsm(dispatcher, emptyState);
+export function newAppBarRightFsm() {
+  return newFsm(emptyState, transition);
 }
 
-export enum AppBarRightStateTag {
-  Empty,
-  User
-}
+export enum StateTag { Empty, User }
 
-export type AppBarRightState = typeof emptyState | ReturnType<typeof newUserState>;
+type State = typeof emptyState | ReturnType<typeof newUserState>;
 
-const emptyState = {
-  tag: AppBarRightStateTag.Empty,
-  transitions: [
-    [ActionTag.UsernameLoaded, (a: Action) => newUserState((a as UsernameLoaded).username)],
-    [ActionTag.LoggedIn, (a: Action) => newUserState((a as LoggedIn).username)],
-  ],
-} as const;
+const emptyState = { tag: StateTag.Empty } as const;
 
 function newUserState(username: string) {
-  return {
-    tag: AppBarRightStateTag.User,
-    transitions: [
-      [ActionTag.LogoutClicked, () => emptyState],
-    ],
-    username,
-  } as const;
+  return { tag: StateTag.User, username } as const;
+}
+
+export function transition(state: State, action: Action): State | undefined {
+  switch (state.tag) {
+    case StateTag.Empty:
+
+      switch (action.tag) {
+        case ActionTag.UsernameLoaded: return newUserState(action.username);
+        case ActionTag.LoggedIn: return newUserState(action.username);
+      }
+
+      break;
+    case StateTag.User:
+
+      switch (action.tag) {
+        case ActionTag.LogoutClicked: return emptyState;
+      }
+
+      break;
+    default: assertNever(state);
+  }
+  return undefined;
 }

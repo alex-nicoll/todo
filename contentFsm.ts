@@ -1,15 +1,15 @@
-import { Action, ActionTag, TodosLoaded } from "./actions";
-import type { Dispatcher } from "./dispatcher";
+import { Action, ActionTag } from "./actions";
+import { assertNever } from "./assertNever";
 import { newFsm } from "./fsm";
 import { TodoStore } from "./todoStore";
 
 export type ContentFsm = ReturnType<typeof newContentFsm>;
 
-export function newContentFsm(dispatcher: Dispatcher) {
-  return newFsm(dispatcher, loadingUsernameState);
+export function newContentFsm() {
+  return newFsm(loadingUsernameState, transition);
 }
 
-export enum ContentStateTag {
+export enum StateTag {
   Error,
   LoadingTodos,
   LoadingUsername,
@@ -18,60 +18,75 @@ export enum ContentStateTag {
   Todos,
 }
 
-export type ContentState =
-  typeof loadingUsernameState
+type State =
+  | typeof loadingUsernameState
   | typeof loadingTodosState
   | typeof loginState
   | typeof errorState
   | ReturnType<typeof newTodosState>
   | typeof loggingOutState;
 
-const loadingUsernameState = {
-  tag: ContentStateTag.LoadingUsername,
-  transitions: [
-    [ActionTag.UsernameLoaded, () => loadingTodosState],
-    [ActionTag.UsernameNotLoaded, () => loginState],
-    [ActionTag.GetUsernameError, () => errorState],
-  ],
-} as const;
+const loadingUsernameState = { tag: StateTag.LoadingUsername } as const;
 
-const loadingTodosState = {
-  tag: ContentStateTag.LoadingTodos,
-  transitions: [
-    [ActionTag.TodosLoaded, (a: Action) => newTodosState((a as TodosLoaded).todoStore)],
-    [ActionTag.LogoutClicked, () => loggingOutState],
-    [ActionTag.GetTodosError, () => errorState],
-  ],
-} as const;
+const loadingTodosState = { tag: StateTag.LoadingTodos } as const;
 
-const loginState = {
-  tag: ContentStateTag.Login,
-  transitions: [
-    [ActionTag.LoggedIn, () => loadingTodosState],
-    [ActionTag.LoginError, () => errorState],
-  ],
-} as const;
+const loginState = { tag: StateTag.Login } as const;
 
-const errorState = {
-  tag: ContentStateTag.Error,
-  transitions: [],
-} as const;
+const errorState = { tag: StateTag.Error } as const;
 
 function newTodosState(todoStore: TodoStore) {
-  return {
-    tag: ContentStateTag.Todos,
-    transitions: [
-      [ActionTag.LogoutClicked, () => loggingOutState],
-      [ActionTag.SyncError, () => errorState],
-    ],
-    todoStore,
-  } as const;
+  return { tag: StateTag.Todos, todoStore } as const;
 }
 
-const loggingOutState = {
-  tag: ContentStateTag.LoggingOut,
-  transitions: [
-    [ActionTag.LoggedOut, () => loginState],
-    [ActionTag.LogoutError, () => errorState],
-  ],
-} as const;
+const loggingOutState = { tag: StateTag.LoggingOut } as const;
+
+export function transition(state: State, action: Action): State | undefined {
+  switch (state.tag) {
+    case StateTag.LoadingUsername:
+
+      switch (action.tag) {
+        case ActionTag.UsernameLoaded: return loadingTodosState;
+        case ActionTag.UsernameNotLoaded: return loginState;
+        case ActionTag.GetUsernameError: return errorState;
+      }
+
+      break;
+    case StateTag.LoadingTodos:
+
+      switch (action.tag) {
+        case ActionTag.TodosLoaded: return newTodosState(action.todoStore);
+        case ActionTag.LogoutClicked: return loggingOutState;
+        case ActionTag.GetTodosError: return errorState;
+      }
+
+      break;
+    case StateTag.Login:
+
+      switch (action.tag) {
+        case ActionTag.LoggedIn: return loadingTodosState;
+        case ActionTag.LoginError: return errorState;
+      }
+
+      break;
+    case StateTag.Error:
+      break;
+    case StateTag.Todos:
+
+      switch (action.tag) {
+        case ActionTag.LogoutClicked: return loggingOutState;
+        case ActionTag.SyncError: return errorState;
+      }
+      
+      break;
+    case StateTag.LoggingOut:
+
+      switch (action.tag) {
+        case ActionTag.LoggedOut: return loginState;
+        case ActionTag.LogoutError: return errorState;
+      }
+
+      break;
+    default: assertNever(state);
+  }
+  return undefined;
+}

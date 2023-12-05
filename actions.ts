@@ -7,7 +7,11 @@ import { TodoStore } from "./todoStore";
  * but that name is already used to refer to DOM events. Actions are similar to
  * input symbols in the context of finite state machines.
  */
-export type Action = { tag: ActionTag; } | TodosLoaded | LoggedIn | UsernameLoaded
+export type Action =  BasicAction | ComplexAction;
+
+type BasicAction = { tag: Exclude<ActionTag, ComplexAction["tag"]> }
+
+type ComplexAction = TodosLoaded | LoggedIn | UsernameLoaded;
 
 /** An ActionTag identifies a type of action. */
 export enum ActionTag {

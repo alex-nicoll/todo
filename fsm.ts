@@ -1,44 +1,23 @@
-import { AppBarCenterState } from "./appBarCenterFsm";
-import { AppBarRightState } from "./appBarRightFsm";
-import { ContentState } from "./contentFsm";
-import { Dispatcher } from "./dispatcher";
+import { Action } from "./actions";
 
-export type State = AppBarCenterState | AppBarRightState | ContentState;
+export type Fsm<S> = ReturnType<typeof newFsm<S>>;
 
-export type Fsm = ReturnType<typeof newFsm>;
+export function newFsm<S>(initialState: S, transition: (state: S, action: Action) => S | undefined) {
 
-// Fsm works as follows. When an Action is dispatched using dispatcher, if that
-// Action's ActionTag matches the ActionTag of one of the current state's
-// transitions, that transition's state constructor is called, then the value of
-// getState() changes to the return value of the constructor, and then the
-// subscriber is called.
-export function newFsm(dispatcher: Dispatcher, startState: State) {
-
-  let state: State;
-
-  let unregisterFns: (() => void)[];
+  let state: S = initialState;
 
   let subscriber: (() => void) | undefined;
 
-  enterState(startState);
+  function dispatch(action: Action) {
+    const nextState = transition(state, action);
+    if (nextState !== undefined) {
+      state = nextState;
+      subscriber!();
+    }
+  }
 
   function getState() {
     return state;
-  }
-
-  function transition(nextState: State) {
-    unregisterFns.forEach((fn) => fn());
-    enterState(nextState);
-    subscriber!();
-  }
-
-  function enterState(nextState: State) {
-    unregisterFns = nextState.transitions.map(([tag, stateCtor]) => {
-      return dispatcher.register(tag, (a) => {
-        transition(stateCtor(a));
-      });
-    });
-    state = nextState;
   }
 
   // subscribe registers a callback to be invoked whenever the value of
@@ -49,8 +28,5 @@ export function newFsm(dispatcher: Dispatcher, startState: State) {
     return () => subscriber = undefined;
   }
 
-  return {
-    getState,
-    subscribe
-  };
+  return { dispatch, getState, subscribe }
 }
