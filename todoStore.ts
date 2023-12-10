@@ -7,8 +7,8 @@ export type TodoStoreArgs = {
   /** The URL with which API calls should be executed */
   apiUrl: string;
   /** 
-   * The Dispatcher through which {@link ActionTag.SyncError} actions will be
-   * dispatched 
+   * The {@link Dispatcher} through which {@link ActionTag.SyncError} actions
+   * will be dispatched 
    */
   dispatcher: Dispatcher;
   /**
@@ -18,7 +18,10 @@ export type TodoStoreArgs = {
   syncStore: SyncStore;
   /** The initial todo list version */
   version: number;
-  /** A map from todo ID to todo value */
+  /**
+   * A map from todo ID to todo value. The map must not be modified after being
+   * passed to {@link newTodoStore}.
+   */
   todos: Map<string, string>;
 }
 
