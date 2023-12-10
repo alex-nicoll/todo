@@ -6,6 +6,54 @@ import { callApi } from "./api";
 import { Dispatcher } from "./dispatcher";
 import { loadTodos } from "./loadTodos";
 
+type LoginFormState = {
+  isLogin: true;
+  username: string; 
+  password: string;
+  isLoggingIn: boolean;
+  isInvalid: boolean;
+};
+
+function newLoginFormState(): LoginFormState {
+  return {
+    isLogin: true,
+    username: "",
+    password: "",
+    isLoggingIn: false,
+    isInvalid: false
+  };
+}
+
+function isLoginDisabled(state: LoginFormState) {
+  return state.username === "" || state.password === "";
+}
+
+type CreateUserFormState = {
+  isLogin: false;
+  username: string;
+  password: string;
+  confirmPassword: string;
+  isCreatingUser: boolean;
+  isUsernameTaken: boolean;
+};
+
+function newCreateUserFormState(): CreateUserFormState {
+  return {
+    isLogin: false,
+    username: "",
+    password: "",
+    confirmPassword: "",
+    isCreatingUser: false,
+    isUsernameTaken: false,
+  };
+}
+
+function isCreateUserDisabled(state: CreateUserFormState) {
+  return state.username === "" || state.password === "" || state.confirmPassword === "";
+}
+
+type LoginOrCreateUserState = LoginFormState | CreateUserFormState;
+
 type LoginOrCreateUserProps = {
   apiUrl: string;
   dispatcher: Dispatcher;
@@ -14,69 +62,104 @@ type LoginOrCreateUserProps = {
 export function LoginOrCreateUser({ apiUrl, dispatcher }: LoginOrCreateUserProps) {
   console.log("rendering LoginOrCreateUser");
 
-  const [isLogin, setIsLogin] = React.useState(true);
+  const [state, setState] = React.useState<LoginOrCreateUserState>(newLoginFormState);
 
-  function handleLoggedIn(username: string) {
-    dispatcher.dispatch({ tag: ActionTag.LoggedIn, username });
-    loadTodos(apiUrl, dispatcher);
-  }
+  React.useEffect(() => {
 
-  function handleError() {
-    dispatcher.dispatch({ tag: ActionTag.LoginError })
-  }
+    function handleKeyDown(ev: KeyboardEvent) {
+      if (ev.code !== "Enter") {
+        return;
+      }
+      if (state.isLogin) {
+        if (!isLoginDisabled(state)) {
+          login({ apiUrl, dispatcher, state, setState });
+        }
+      } else {
+        if (!isCreateUserDisabled(state)) {
+          createUser({ apiUrl, dispatcher, state, setState });
+        }
+      }
+    }
 
-  if (isLogin) {
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  if (state.isLogin) {
     return (
       <LoginForm
-        apiUrl={apiUrl}
-        onShowCreateUserForm={() => setIsLogin(false)}
-        onLoggedIn={handleLoggedIn}
-        onError={handleError}
+        state={state}
+        setState={setState}
+        onLogin={() => login({ apiUrl, dispatcher, state, setState })}
+        onShowCreateUserForm={() => setState(newCreateUserFormState())}
       />
     );
   }
   return (
     <CreateUserForm
-      apiUrl={apiUrl}
-      onShowLoginForm={() => setIsLogin(true)}
-      onLoggedIn={handleLoggedIn}
-      onError={handleError}
+      state={state}
+      setState={setState}
+      onCreateUser={() => createUser({ apiUrl, dispatcher, state, setState })}
+      onShowLoginForm={() => setState(newLoginFormState())}
     />
   );
 }
 
-type LoginFormProps = {
+type LoginArgs = {
   apiUrl: string;
-  onShowCreateUserForm: () => void;
-  onLoggedIn: (username: string) => void;
-  onError: () => void;
+  dispatcher: Dispatcher
+  state: LoginFormState;
+  setState: (state: LoginFormState) => void;
 };
 
-function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError }: LoginFormProps) {
-  console.log("rendering LoginForm");
-
-  const [state, setState] = React.useState({
-    username: "",
-    password: "",
-    isLoggingIn: false,
-    isInvalid: false
-  });
-
-  async function login() {
-    setState({ ...state, isLoggingIn: true });
-    const { username, password } = state;
-    const result = await callApi(apiUrl, "login", { username, password });
-    if (result === "failed") {
-      onError();
-      return;
-    }
-    if (result.didLogin === false) {
-      // The operation succeeded but the user's credentials were rejected.
-      setState({ ...state, isInvalid: true });
-      return;
-    }
-    onLoggedIn(username);
+async function login({ apiUrl, dispatcher, state, setState }: LoginArgs) {
+  setState({ ...state, isLoggingIn: true });
+  const { username, password } = state;
+  const result = await callApi(apiUrl, "login", { username, password });
+  if (result === "failed") {
+    dispatcher.dispatch({ tag: ActionTag.LoginError })
+    return;
   }
+  if (result.didLogin === false) {
+    // The operation succeeded but the user's credentials were rejected.
+    setState({ ...state, isInvalid: true });
+    return;
+  }
+  dispatcher.dispatch({ tag: ActionTag.LoggedIn, username });
+  loadTodos(apiUrl, dispatcher);
+}
+
+type CreateUserArgs = {
+  apiUrl: string;
+  dispatcher: Dispatcher
+  state: CreateUserFormState;
+  setState: (state: CreateUserFormState) => void;
+};
+
+async function createUser({ apiUrl, dispatcher, state, setState }: CreateUserArgs) {
+  setState({ ...state, isCreatingUser: true });
+  const { username, password } = state;
+  const result = await callApi(apiUrl, "createUser", { username, password });
+  if (result === "failed") {
+    dispatcher.dispatch({ tag: ActionTag.LoginError })
+    return;
+  }
+  if (result.isNameTaken) {
+    setState({ ...state, isUsernameTaken: true });
+    return;
+  }
+  dispatcher.dispatch({ tag: ActionTag.LoggedIn, username });
+  loadTodos(apiUrl, dispatcher);
+}
+
+type LoginFormProps = {
+  state: LoginFormState;
+  setState: (state: LoginFormState) => void;
+  onLogin: () => void;
+  onShowCreateUserForm: () => void;
+};
+
+function LoginForm({ state, setState, onLogin, onShowCreateUserForm }: LoginFormProps) {
 
   const style = { margin: "10px 0" };
   let invalidIndicator = undefined;
@@ -130,9 +213,9 @@ function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError }: LoginF
       {invalidIndicator}
       <LoadingButton
         sx={style}
-        disabled={state.username === "" || state.password === ""}
+        disabled={isLoginDisabled(state)}
         loading={state.isLoggingIn}
-        onClick={login}
+        onClick={onLogin}
       >
         Sign in
       </LoadingButton>
@@ -141,37 +224,13 @@ function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError }: LoginF
 }
 
 type CreateUserFormProps = {
-  apiUrl: string;
+  state: CreateUserFormState;
+  setState: (state: CreateUserFormState) => void;
+  onCreateUser: () => void;
   onShowLoginForm: () => void;
-  onLoggedIn: (username: string) => void;
-  onError: () => void;
 };
 
-function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError }: CreateUserFormProps) {
-  console.log("rendering CreateUserForm");
-
-  const [state, setState] = React.useState({
-    username: "",
-    password: "",
-    confirmPassword: "",
-    isCreatingUser: false,
-    isUsernameTaken: false,
-  });
-
-  async function createUser() {
-    setState({ ...state, isCreatingUser: true });
-    const { username, password } = state;
-    const result = await callApi(apiUrl, "createUser", { username, password });
-    if (result === "failed") {
-      onError();
-      return;
-    }
-    if (result.isNameTaken) {
-      setState({ ...state, isUsernameTaken: true });
-      return;
-    }
-    onLoggedIn(username);
-  }
+function CreateUserForm({ state, setState, onCreateUser, onShowLoginForm }: CreateUserFormProps) {
 
   let usernameProps;
   if (state.isUsernameTaken) {
@@ -241,9 +300,9 @@ function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError }: Create
       />
       <LoadingButton
         sx={style}
-        disabled={state.username === "" || state.password === "" || state.confirmPassword === ""}
+        disabled={isCreateUserDisabled(state)}
         loading={state.isCreatingUser}
-        onClick={createUser}
+        onClick={onCreateUser}
       >
         Create account
       </LoadingButton>
