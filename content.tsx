@@ -4,7 +4,7 @@ import { ContentFsm, StateTag } from "./contentFsm";
 import { Dispatcher } from "./dispatcher";
 import { LoginOrCreateUser } from "./loginOrCreateUser";
 import { TodoList } from "./todoList";
-import { useSubscribeToFsm } from "./useSubscribeToFsm";
+import { useSubscribe } from "./publisher";
 
 type ContentProps = { 
   fsm: ContentFsm;
@@ -15,7 +15,7 @@ type ContentProps = {
 export function Content({ fsm, apiUrl, dispatcher }: ContentProps) {
   console.log("rendering Content");
 
-  useSubscribeToFsm(fsm);
+  useSubscribe(fsm);
 
   const state = fsm.getState();
   if (state.tag === StateTag.LoadingUsername ||

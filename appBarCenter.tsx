@@ -2,7 +2,7 @@ import { Typography } from "@mui/material";
 import { AppBarCenterFsm, StateTag } from "./appBarCenterFsm";
 import { assertNever } from "./assertNever";
 import { SyncText } from "./syncText";
-import { useSubscribeToFsm } from "./useSubscribeToFsm";
+import { useSubscribe } from "./publisher";
 
 type AppBarCenterProps = {
   fsm: AppBarCenterFsm;
@@ -11,7 +11,7 @@ type AppBarCenterProps = {
 export function AppBarCenter({ fsm }: AppBarCenterProps) {
   console.log("rendering AppBarCenter");
 
-  useSubscribeToFsm(fsm);
+  useSubscribe(fsm);
 
   const state = fsm.getState();
   if (state.tag === StateTag.Empty) {

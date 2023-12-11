@@ -5,7 +5,7 @@ import { callApiNoParse } from "./api";
 import { AppBarRightFsm, StateTag } from "./appBarRightFsm";
 import { assertNever } from "./assertNever";
 import { Dispatcher } from "./dispatcher";
-import { useSubscribeToFsm } from "./useSubscribeToFsm";
+import { useSubscribe } from "./publisher";
 
 type AppBarRightProps = {
   fsm: AppBarRightFsm;
@@ -16,7 +16,7 @@ type AppBarRightProps = {
 export function AppBarRight({ fsm, apiUrl, dispatcher }: AppBarRightProps) {
   console.log("rendering AppBarRight");
 
-  useSubscribeToFsm(fsm);
+  useSubscribe(fsm);
 
   async function logout() {
     dispatcher.dispatch({ tag: ActionTag.LogoutClicked });

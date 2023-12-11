@@ -5,6 +5,8 @@ import { ActionTag } from "./actions";
 import { callApi } from "./api";
 import { Dispatcher } from "./dispatcher";
 import { loadTodos } from "./loadTodos";
+import { Observable, newObservable } from "./observable";
+import { useSubscribe } from "./publisher";
 
 type LoginFormState = {
   isLogin: true;
@@ -52,7 +54,7 @@ function isCreateUserDisabled(state: CreateUserFormState) {
   return state.username === "" || state.password === "" || state.confirmPassword === "";
 }
 
-type LoginOrCreateUserState = LoginFormState | CreateUserFormState;
+type FormState = LoginFormState | CreateUserFormState;
 
 type LoginOrCreateUserProps = {
   apiUrl: string;
@@ -60,9 +62,31 @@ type LoginOrCreateUserProps = {
 };
 
 export function LoginOrCreateUser({ apiUrl, dispatcher }: LoginOrCreateUserProps) {
+  return (
+    <Internal
+      apiUrl={apiUrl}
+      dispatcher={dispatcher}
+      form={newObservable<FormState>(newLoginFormState())}
+    />
+  );
+}
+
+type InternalProps = LoginOrCreateUserProps & {
+  /**
+   * Component {@link Internal} expects an {@link Observable}-wrapped 
+   * {@link FormState} as a prop. This allows access to the {@link FormState}
+   * from a React effect that has an empty dependency array. Such access isn't
+   * possible through typical usage of {@link React.useState}. If we just called
+   * {@link React.useState} at the top level of {@link Internal}, the effect
+   * would have access to the initial state, but not subsequent states.
+   */
+  form: Observable<FormState>
+};
+
+function Internal({ apiUrl, dispatcher, form }: InternalProps) {
   console.log("rendering LoginOrCreateUser");
 
-  const [state, setState] = React.useState<LoginOrCreateUserState>(newLoginFormState);
+  useSubscribe(form);
 
   React.useEffect(() => {
 
@@ -70,13 +94,14 @@ export function LoginOrCreateUser({ apiUrl, dispatcher }: LoginOrCreateUserProps
       if (ev.code !== "Enter") {
         return;
       }
+      const state = form.getState();
       if (state.isLogin) {
         if (!isLoginDisabled(state)) {
-          login({ apiUrl, dispatcher, state, setState });
+          login({ apiUrl, dispatcher, state, setState: form.setState });
         }
       } else {
         if (!isCreateUserDisabled(state)) {
-          createUser({ apiUrl, dispatcher, state, setState });
+          createUser({ apiUrl, dispatcher, state, setState: form.setState });
         }
       }
     }
@@ -85,6 +110,7 @@ export function LoginOrCreateUser({ apiUrl, dispatcher }: LoginOrCreateUserProps
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  const [state, setState] = [form.getState(), form.setState];
   if (state.isLogin) {
     return (
       <LoginForm

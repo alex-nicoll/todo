@@ -1,5 +1,5 @@
-import React from "react";
 import { SyncStore } from "./syncStore";
+import { useSubscribe } from "./publisher";
 
 type SyncTextProps = {
   syncStore: SyncStore;
@@ -8,11 +8,7 @@ type SyncTextProps = {
 export function SyncText({ syncStore }: SyncTextProps) {
   console.log("rendering SyncText");
 
-  const [, setState] = React.useState({});
-  React.useEffect(
-    () => syncStore.subscribe(() => setState({})),
-    []
-  );
+  useSubscribe(syncStore);
 
   return syncStore.isSyncing() ? "Syncing..." : undefined;
 }
