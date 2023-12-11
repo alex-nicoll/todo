@@ -62,6 +62,14 @@ function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError }: LoginF
     isInvalid: false
   });
 
+  const isLoginDisabled = state.username === "" || state.password === "";
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.code === "Enter" && !isLoginDisabled) {
+      login();
+    }
+  }
+
   async function login() {
     setState({ ...state, isLoggingIn: true });
     const { username, password } = state;
@@ -118,6 +126,7 @@ function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError }: LoginF
         label="Username"
         value={state.username}
         onChange={(e) => setState({ ...state, username: e.target.value })}
+        onKeyDown={handleKeyDown}
       />
       <TextField
         sx={style}
@@ -125,12 +134,13 @@ function LoginForm({ apiUrl, onShowCreateUserForm, onLoggedIn, onError }: LoginF
         label="Password"
         value={state.password}
         onChange={(e) => setState({ ...state, password: e.target.value })}
+        onKeyDown={handleKeyDown}
         type={"password"}
       />
       {invalidIndicator}
       <LoadingButton
         sx={style}
-        disabled={state.username === "" || state.password === ""}
+        disabled={isLoginDisabled}
         loading={state.isLoggingIn}
         onClick={login}
       >
@@ -157,6 +167,14 @@ function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError }: Create
     isCreatingUser: false,
     isUsernameTaken: false,
   });
+
+  const isCreateUserDisabled = state.username === "" || state.password === "" || state.confirmPassword === "";
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.code === "Enter" && !isCreateUserDisabled) {
+      createUser();
+    }
+  }
 
   async function createUser() {
     setState({ ...state, isCreatingUser: true });
@@ -219,6 +237,7 @@ function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError }: Create
         label="Username"
         value={state.username}
         onChange={(e) => setState({ ...state, username: e.target.value })}
+        onKeyDown={handleKeyDown}
         {...usernameProps}
       />
       <TextField
@@ -227,6 +246,7 @@ function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError }: Create
         label="Password"
         value={state.password}
         onChange={(e) => setState({ ...state, password: e.target.value })}
+        onKeyDown={handleKeyDown}
         type={"password"}
         {...passwordProps}
       />
@@ -236,12 +256,13 @@ function CreateUserForm({ apiUrl, onShowLoginForm, onLoggedIn, onError }: Create
         label="Confirm password"
         value={state.confirmPassword}
         onChange={(e) => setState({ ...state, confirmPassword: e.target.value })}
+        onKeyDown={handleKeyDown}
         type={"password"}
         {...passwordProps}
       />
       <LoadingButton
         sx={style}
-        disabled={state.username === "" || state.password === "" || state.confirmPassword === ""}
+        disabled={isCreateUserDisabled}
         loading={state.isCreatingUser}
         onClick={createUser}
       >
