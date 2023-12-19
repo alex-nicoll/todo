@@ -7,7 +7,7 @@ import { newTodoStore, newTodosMap } from "./todoStore";
 export async function loadTodos(apiUrl: string, dispatcher: Dispatcher) {
   const result = await callApi(apiUrl, "getTodos");
   if (result === "failed") {
-    dispatcher.dispatch({ tag: ActionTag.GetTodosError });
+    dispatcher.dispatch({ tag: ActionTag.LoadTodosError });
     return;
   }
   const { version, todos } = result;

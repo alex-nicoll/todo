@@ -56,7 +56,7 @@ export function transition(state: State, action: Action): State | undefined {
       switch (action.tag) {
         case ActionTag.TodosLoaded: return newTodosState(action.todoStore);
         case ActionTag.LogoutClicked: return loggingOutState;
-        case ActionTag.GetTodosError: return errorState;
+        case ActionTag.LoadTodosError: return errorState;
       }
 
       break;

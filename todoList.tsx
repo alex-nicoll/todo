@@ -11,6 +11,19 @@ type TodoListProps = {
 export function TodoList({ todoStore }: TodoListProps) {
   console.log("rendering TodoList");
 
+  React.useEffect(
+    () => {
+      function handleVisibilityChange() {
+        if (document.visibilityState === "visible") {
+          todoStore.refreshTodos();
+        }
+      }
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+      return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+    },
+    []
+  );
+
   const [, setState] = React.useState({});
   React.useEffect(
     () => todoStore.subscribeToKeys(() => setState({})),
