@@ -31,7 +31,7 @@ func main() {
 	}
 	jwtSigningKey, err := base64.StdEncoding.DecodeString(jwtSigningKeyBase64)
 	if err != nil {
-		log.Fatal("Failed to decode signing key: %v", err)
+		log.Fatalf("Failed to decode signing key: %v", err)
 	}
 
 	dbUrl, ok := os.LookupEnv("DB_URL")
@@ -106,6 +106,11 @@ func (h *apiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	atr := &appendTodoRqst{}
 	if err := json.Unmarshal(body, atr); err == nil && atr.Operation == "appendTodo" {
 		withVerifyCookie(func(uid string) { h.serveAppendTodo(w, atr, uid) })(h, w, r)
+		return
+	}
+	rtr := &refreshTodosRqst{}
+	if err := json.Unmarshal(body, rtr); err == nil && rtr.Operation == "refreshTodos" {
+		withVerifyCookie(func(uid string) { h.serveRefreshTodos(w, rtr, uid) })(h, w, r)
 		return
 	}
 	log.Printf("received invalid or unrecognized JSON: %s", body)
@@ -402,8 +407,8 @@ func (h *apiHandler) serveUpdateTodo(w http.ResponseWriter, r *updateTodoRqst, u
 	h.serveMutateTodo(w, r.Version, r.Id, uid, &updateOperation{id: r.Id, uid: uid, value: r.Value})
 }
 
-func (h *apiHandler) serveMutateTodo(w http.ResponseWriter, rqstVersion int32, rqstId string, uid string, op execOperation) {
-	resp := h.txMutateTodo(rqstVersion, rqstId, uid, op)
+func (h *apiHandler) serveMutateTodo(w http.ResponseWriter, version int32, id string, uid string, op execOperation) {
+	resp := h.txMutateTodo(version, id, uid, op)
 	if resp == "bad request" {
 		w.WriteHeader(http.StatusBadRequest)
 		return
@@ -420,13 +425,13 @@ type execOperation interface {
 	run(tx pgx.Tx) (pgconn.CommandTag, error)
 }
 
-// txMutateTodo runs a transaction that mutates a particular todo. rqstVersion and
-// rqstId are the todo list version and todo ID in the request that initiated
-// the transaction. op is the operation (e.g. UPDATE, DELETE) to perform.
-// txMutateTodo returns a response struct if the transaction was successful, "bad
-// request" if the transaction failed due to a problem with the request, or nil
-// if the transaction failed for some other reason.
-func (h *apiHandler) txMutateTodo(rqstVersion int32, rqstId string, uid string, op execOperation) any {
+// txMutateTodo runs a transaction that mutates a particular todo. version and
+// id are the todo list version and todo ID in the request that initiated the
+// transaction. op is the operation (e.g. UPDATE, DELETE) to perform.
+// txMutateTodo returns a response struct if the transaction was successful,
+// "bad request" if the transaction failed due to a problem with the request, or
+// nil if the transaction failed for some other reason.
+func (h *apiHandler) txMutateTodo(version int32, id string, uid string, op execOperation) any {
 	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
 		IsoLevel:       pgx.Serializable,
 		AccessMode:     pgx.ReadWrite,
@@ -438,27 +443,14 @@ func (h *apiHandler) txMutateTodo(rqstVersion int32, rqstId string, uid string, 
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
 	}
-	version, ok := getVersion(tx, uid)
+	resp, ok := checkVersion(tx, uid, version)
 	if !ok {
 		return nil
 	}
-	if rqstVersion != version {
-		log.Println("version mismatch")
-		todos := getTodos(tx, uid)
-		if todos == nil {
-			return nil
-		}
-		err = tx.Commit(context.Background())
-		if err != nil {
-			log.Printf("Failed to commit transaction: %v", err)
-			return nil
-		}
-		return &versionMismatchResp{
-			Version: version,
-			Todos:   todos,
-		}
+	if resp != nil {
+		return resp
 	}
-	mutateResult := mutateTodo(tx, op, rqstId, uid)
+	mutateResult := mutateTodo(tx, op, id, uid)
 	if mutateResult == "failed" {
 		return nil
 	}
@@ -475,6 +467,34 @@ func (h *apiHandler) txMutateTodo(rqstVersion int32, rqstId string, uid string, 
 		return nil
 	}
 	return &mutateTodoResp{Version: newVersion}
+}
+
+// checkVersion checks for a mismatch between the given version and the stored
+// version. If ok == false, then an error occurred. Otherwise, resp holds the
+// response if a mismatch was detected, or nil if the versions match.
+//
+// If a mismatch is detected, checkVersion also attempts to commit tx.
+func checkVersion(tx pgx.Tx, uid string, version int32) (resp *versionMismatchResp, ok bool) {
+	storedVersion, ok := getVersion(tx, uid)
+	if !ok {
+		return nil, false
+	}
+	if version != storedVersion {
+		log.Println("version mismatch")
+		todos := getTodos(tx, uid)
+		if todos == nil {
+			return nil, false
+		}
+		if err := tx.Commit(context.Background()); err != nil {
+			log.Printf("Failed to commit transaction: %v", err)
+			return nil, false
+		}
+		return &versionMismatchResp{
+			Version: storedVersion,
+			Todos:   todos,
+		}, true
+	}
+	return nil, true
 }
 
 func (h *apiHandler) serveAppendTodo(w http.ResponseWriter, r *appendTodoRqst, uid string) {
@@ -540,6 +560,33 @@ func (h *apiHandler) txAppendTodo(r *appendTodoRqst, uid string) any {
 	}
 }
 
+func (h *apiHandler) serveRefreshTodos(w http.ResponseWriter, r *refreshTodosRqst, uid string) {
+	resp, ok := h.txRefreshTodos(r, uid)
+	if !ok {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if resp == nil {
+		return
+	}
+	writeJson(w, resp)
+}
+
+func (h *apiHandler) txRefreshTodos(r *refreshTodosRqst, uid string) (resp *versionMismatchResp, ok bool) {
+	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
+		IsoLevel:       pgx.Serializable,
+		AccessMode:     pgx.ReadOnly,
+		DeferrableMode: pgx.NotDeferrable,
+	})
+	// Rollback is a no-op if the transaction is already committed/aborted.
+	defer tx.Rollback(context.Background())
+	if err != nil {
+		log.Printf("Failed to start transaction: %v", err)
+		return nil, false
+	}
+	return checkVersion(tx, uid, r.Version)
+}
+
 type deleteOperation struct {
 	id  string
 	uid string
@@ -576,7 +623,7 @@ func mutateTodo(tx pgx.Tx, op execOperation, id string, uid string) string {
 	rowsAffected := ct.RowsAffected()
 	if rowsAffected == 0 {
 		log.Printf("Failed to mutate todo with ID %v and UID %v. todo does "+
-			"not exist.", id, uid, rowsAffected)
+			"not exist.", id, uid)
 		return "nonexistent"
 	}
 	if rowsAffected != 1 {
@@ -677,6 +724,7 @@ func getVersion(tx pgx.Tx, uid string) (int32, bool) {
 }
 
 func writeJson(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	err := enc.Encode(v)
 	if err != nil {

@@ -6,7 +6,7 @@ todo is a to-do list web application. It supports creating, deleting, and updati
 
 An initial goal of this exercise was to practice building web applications with scalablity and high availability in mind, while getting more experience with React, Go, and PostgreSQL.
 
-An interesting feature of this application is that it uses a "version-checking" approach to detecting concurrency, which keeps the web server stateless. Each list has a version associated with it, which is replicated to each client. When a client attempts to replicate a change to the server, the server checks the version sent along with the change, and if it doesn't match, rejects the change and sends the client a new list snapshot and version. From the user's perspective, when they make a change, the application says that it is "syncing", after which they see any changes that they made from other web browsers (whatever change they made on the current browser is lost). The user can manually "sync" by refreshing the page.
+An interesting feature of this application is that it uses a "version-checking" approach to detecting concurrency, which keeps the web server stateless. Each list has a version associated with it, which is replicated to each client. When a client attempts to replicate a change to the server, the server checks the version sent along with the change, and if it doesn't match, rejects the change and sends the client a new list snapshot and version. From the user's perspective, when they make a change or open the tab/window, the application says that it is "syncing", after which they see any changes that they made from other web browsers. For simplicity's sake, there is no merging of replicas; the change that triggered the "sync" may be lost.
 
 ## Installation
 

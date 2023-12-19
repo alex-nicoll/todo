@@ -78,9 +78,14 @@ type appendTodoResp struct {
 	Id      string `json:"id"`
 }
 
-// The client can differentiate between a normal mutate/append response and a
-// version mismatch response by checking for the existence of "todos" in the
-// response JSON.
+// Refresh requests do not return any JSON if the client's todos are up-to-date.
+type refreshTodosRqst struct {
+	Operation string `json:"operation"`
+	Version   int32  `json:"version"`
+}
+
+// This is an alternate response for delete, update, append, and refresh
+// requests.
 type versionMismatchResp struct {
 	Version int32       `json:"version"`
 	Todos   [][2]string `json:"todos"`

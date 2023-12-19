@@ -16,7 +16,7 @@ type ComplexAction = TodosLoaded | LoggedIn | UsernameLoaded;
 /** An ActionTag identifies a kind of {@link Action}. */
 export enum ActionTag {
   GetUsernameError,
-  GetTodosError,
+  LoadTodosError,
   LoggedIn,
   LoggedOut,
   LoginError,

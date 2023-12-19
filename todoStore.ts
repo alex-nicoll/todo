@@ -1,4 +1,4 @@
-import { callApi } from "./api";
+import { callApi, callApiNoParse, containsJson, parseJson } from "./api";
 import { Dispatcher } from "./dispatcher";
 import { ActionTag } from "./actions";
 import { SyncStore } from "./syncStore";
@@ -130,6 +130,30 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: 
     keySubscriber!();
   }
 
+  async function refreshTodos() {
+    enqueue(async () => {
+      const resp = await callApiNoParse(apiUrl, "refreshTodos", { version });
+      if (resp === "failed") {
+        dispatcher.dispatch({ tag: ActionTag.SyncError });
+        return;
+      }
+      if (!containsJson(resp)) {
+        // Already up-to-date.
+        console.log("up to date");
+        return;
+      }
+      const result = await parseJson(resp);
+      if (result === "failed") {
+        dispatcher.dispatch({ tag: ActionTag.SyncError });
+        return;
+      }
+      console.log("updating todos");
+      version = result.version;
+      todos = newTodosMap(result.todos);
+      keySubscriber!();
+    });
+  }
+
   /**
    * enqueue adds a potentially async function to the back of the task queue. It
    * returns a Promise representing the function's result.
@@ -149,12 +173,12 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: 
    *
    * It returns "done" if the request failed, or if the request succeeded and
    * the todo list has been downloaded and rerendered due to a version mismatch
-   * detected by the server. If the request failed, a sync error event is
-   * dispatched.
+   * detected by the server. If the request failed, an 
+   * {@link ActionTag.SyncError} action is dispatched.
    *
    * Otherwise, it returns the response body parsed as JSON.
    */
-  async function callApiWithVersion(operation: string, args?: object) {
+  async function callApiWithVersion(operation: "deleteTodo" | "updateTodo" | "appendTodo", args?: object) {
     const result = await callApi(apiUrl, operation, { version, ...args });
     if (result === "failed") {
       dispatcher.dispatch({ tag: ActionTag.SyncError });
@@ -175,7 +199,8 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: 
     getTodos,
     deleteTodo,
     updateTodo,
-    appendTodo
+    appendTodo,
+    refreshTodos
   };
 }
 
