@@ -34,10 +34,10 @@ export function AppBarRight({ fsm, apiUrl, dispatcher }: AppBarRightProps) {
   }
   if (state.tag === StateTag.User) {
     return (
-      <Box sx={{ display: "flex", alignItems: "center" }}>
-        <Typography>
-          {state.username}
-        </Typography>
+      <Box sx={{ display: "flex", alignItems: "center", overflow: "hidden" }}>
+          <Typography sx={{ overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+            {state.username}
+          </Typography>
         <IconButton sx={{ color: "#ffffff" }} onClick={logout}>
           <Logout />
         </IconButton>

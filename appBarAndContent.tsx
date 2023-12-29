@@ -58,7 +58,7 @@ export function AppBarAndContent({
         <Box sx={{ flex: "1", display: "flex", justifyContent: "center" }}>
           <AppBarCenter fsm={appBarCenterFsm} />
         </Box>
-        <Box sx={{ flex: "1", display: "flex", justifyContent: "right" }}>
+        <Box sx={{ flex: "1", display: "flex", justifyContent: "right", overflow: "hidden" }}>
           <AppBarRight
             fsm={appBarRightFsm}
             apiUrl={apiUrl}
