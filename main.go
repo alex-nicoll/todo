@@ -34,15 +34,15 @@ func main() {
 		log.Fatalf("Failed to decode signing key: %v", err)
 	}
 
-	dbUrl, ok := os.LookupEnv("DB_URL")
+	dbURL, ok := os.LookupEnv("DB_URL")
 	if !ok {
 		log.Fatal("DB_URL not set")
 	}
-	pool, err := pgxpool.New(context.Background(), dbUrl)
-	defer pool.Close()
+	pool, err := pgxpool.New(context.Background(), dbURL)
 	if err != nil {
 		log.Fatalf("Failed to create database connection pool: %v\n", err)
 	}
+	defer pool.Close()
 
 	http.Handle("/api", &apiHandler{
 		pool:          pool,
@@ -137,17 +137,17 @@ func (h *apiHandler) verifyCookie(w http.ResponseWriter, r *http.Request) string
 		w.WriteHeader(http.StatusBadRequest)
 		return ""
 	}
-	return h.getUidFromJwt(w, c.Value)
+	return h.getUIDFromJwt(w, c.Value)
 }
 
-// getUidFromJwt verifies the JWT and extracts the user ID.
+// getUIDFromJwt verifies the JWT and extracts the user ID.
 //
 // If the JWT can't be verified, then the containing cookie is deleted and
 // http.StatusInternalServerError is sent. Since the server is responsible for
 // generating the JWT in the first place, a potential server programming error
 // is indicated. There could be another cause (like a forgery attempt), but we
 // shouldn't hide programming errors.
-func (h *apiHandler) getUidFromJwt(w http.ResponseWriter, tokenString string) string {
+func (h *apiHandler) getUIDFromJwt(w http.ResponseWriter, tokenString string) string {
 	token, err := jwt.Parse(
 		tokenString,
 		func(t *jwt.Token) (interface{}, error) {
@@ -187,9 +187,9 @@ func writeDeleteCookie(w http.ResponseWriter, cookieName string) {
 }
 
 func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
-	uid, pwd, err := getUidAndPwd(h.pool, r.Username)
+	uid, pwd, err := getUIDAndPassword(h.pool, r.Username)
 	if err == pgx.ErrNoRows {
-		writeJson(w, &loginResp{DidLogin: false})
+		writeJSON(w, &loginResp{DidLogin: false})
 		return
 	}
 	if err != nil {
@@ -198,19 +198,19 @@ func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
 		return
 	}
 	if r.Password != pwd {
-		writeJson(w, &loginResp{DidLogin: false})
+		writeJSON(w, &loginResp{DidLogin: false})
 		return
 	}
 	if !h.login(w, uid) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	writeJson(w, &loginResp{DidLogin: true})
+	writeJSON(w, &loginResp{DidLogin: true})
 }
 
-// getUidAndPwd gets the user ID and password for the given user name, or
+// getUIDAndPassword gets the user ID and password for the given user name, or
 // returns an error. It returns pgx.ErrNoRows if the user name doesn't exist.
-func getUidAndPwd(pool *pgxpool.Pool, name string) (uid string, pwd string, err error) {
+func getUIDAndPassword(pool *pgxpool.Pool, name string) (uid string, pwd string, err error) {
 	query := "SELECT id, password FROM users WHERE name = $1"
 	row := pool.QueryRow(context.Background(), query, name)
 	err = row.Scan(&uid, &pwd)
@@ -237,10 +237,10 @@ func (h *apiHandler) serveGetUsername(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie(h.cookieName)
 	if err != nil {
 		// User is not logged in.
-		writeJson(w, &getUsernameResp{Username: ""})
+		writeJSON(w, &getUsernameResp{Username: ""})
 		return
 	}
-	uid := h.getUidFromJwt(w, c.Value)
+	uid := h.getUIDFromJwt(w, c.Value)
 	if uid == "" {
 		return
 	}
@@ -255,7 +255,7 @@ func (h *apiHandler) serveGetUsername(w http.ResponseWriter, r *http.Request) {
 		// this coupling, it might make more sense to check the user ID's
 		// existence earlier on - maybe when serving the js file?
 		writeDeleteCookie(w, h.cookieName)
-		writeJson(w, &getUsernameResp{Username: ""})
+		writeJSON(w, &getUsernameResp{Username: ""})
 		return
 	}
 	if err != nil {
@@ -263,8 +263,7 @@ func (h *apiHandler) serveGetUsername(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	writeJson(w, &getUsernameResp{Username: username})
-	return
+	writeJSON(w, &getUsernameResp{Username: username})
 }
 
 // getUsername gets the username for the given user ID, or returns an error. It
@@ -282,7 +281,7 @@ func (h *apiHandler) serveCreateUser(w http.ResponseWriter, r *createUserRqst) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	writeJson(w, resp)
+	writeJSON(w, resp)
 }
 
 func (h *apiHandler) txCreateUser(w http.ResponseWriter, r *createUserRqst) *createUserResp {
@@ -291,8 +290,7 @@ func (h *apiHandler) txCreateUser(w http.ResponseWriter, r *createUserRqst) *cre
 		AccessMode:     pgx.ReadWrite,
 		DeferrableMode: pgx.NotDeferrable,
 	})
-	// Rollback is a no-op if the transaction is already committed/aborted.
-	defer tx.Rollback(context.Background())
+	defer rollback(tx)
 	if err != nil {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
@@ -365,7 +363,7 @@ func (h *apiHandler) serveGetTodos(w http.ResponseWriter, uid string) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	writeJson(w, resp)
+	writeJSON(w, resp)
 }
 
 func (h *apiHandler) txGetTodos(uid string) *getTodosResp {
@@ -374,8 +372,7 @@ func (h *apiHandler) txGetTodos(uid string) *getTodosResp {
 		AccessMode:     pgx.ReadOnly,
 		DeferrableMode: pgx.NotDeferrable,
 	})
-	// Rollback is a no-op if the transaction is already committed/aborted.
-	defer tx.Rollback(context.Background())
+	defer rollback(tx)
 	if err != nil {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
@@ -400,11 +397,11 @@ func (h *apiHandler) txGetTodos(uid string) *getTodosResp {
 }
 
 func (h *apiHandler) serveDeleteTodo(w http.ResponseWriter, r *deleteTodoRqst, uid string) {
-	h.serveMutateTodo(w, r.Version, r.Id, uid, &deleteOperation{id: r.Id, uid: uid})
+	h.serveMutateTodo(w, r.Version, r.ID, uid, &deleteOperation{id: r.ID, uid: uid})
 }
 
 func (h *apiHandler) serveUpdateTodo(w http.ResponseWriter, r *updateTodoRqst, uid string) {
-	h.serveMutateTodo(w, r.Version, r.Id, uid, &updateOperation{id: r.Id, uid: uid, value: r.Value})
+	h.serveMutateTodo(w, r.Version, r.ID, uid, &updateOperation{id: r.ID, uid: uid, value: r.Value})
 }
 
 func (h *apiHandler) serveMutateTodo(w http.ResponseWriter, version int32, id string, uid string, op execOperation) {
@@ -417,7 +414,7 @@ func (h *apiHandler) serveMutateTodo(w http.ResponseWriter, version int32, id st
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	writeJson(w, resp)
+	writeJSON(w, resp)
 }
 
 type execOperation interface {
@@ -437,8 +434,7 @@ func (h *apiHandler) txMutateTodo(version int32, id string, uid string, op execO
 		AccessMode:     pgx.ReadWrite,
 		DeferrableMode: pgx.NotDeferrable,
 	})
-	// Rollback is a no-op if the transaction is already committed/aborted.
-	defer tx.Rollback(context.Background())
+	defer rollback(tx)
 	if err != nil {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
@@ -503,7 +499,7 @@ func (h *apiHandler) serveAppendTodo(w http.ResponseWriter, r *appendTodoRqst, u
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	writeJson(w, resp)
+	writeJSON(w, resp)
 }
 
 func (h *apiHandler) txAppendTodo(r *appendTodoRqst, uid string) any {
@@ -515,8 +511,7 @@ func (h *apiHandler) txAppendTodo(r *appendTodoRqst, uid string) any {
 		AccessMode:     pgx.ReadWrite,
 		DeferrableMode: pgx.NotDeferrable,
 	})
-	// Rollback is a no-op if the transaction is already committed/aborted.
-	defer tx.Rollback(context.Background())
+	defer rollback(tx)
 	if err != nil {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
@@ -541,7 +536,7 @@ func (h *apiHandler) txAppendTodo(r *appendTodoRqst, uid string) any {
 		}
 		return &appendTodoResp{
 			Version: newVersion,
-			Id:      id,
+			ID:      id,
 		}
 	}
 	log.Println("version mismatch")
@@ -569,7 +564,7 @@ func (h *apiHandler) serveRefreshTodos(w http.ResponseWriter, r *refreshTodosRqs
 	if resp == nil {
 		return
 	}
-	writeJson(w, resp)
+	writeJSON(w, resp)
 }
 
 func (h *apiHandler) txRefreshTodos(r *refreshTodosRqst, uid string) (resp *versionMismatchResp, ok bool) {
@@ -578,8 +573,7 @@ func (h *apiHandler) txRefreshTodos(r *refreshTodosRqst, uid string) (resp *vers
 		AccessMode:     pgx.ReadOnly,
 		DeferrableMode: pgx.NotDeferrable,
 	})
-	// Rollback is a no-op if the transaction is already committed/aborted.
-	defer tx.Rollback(context.Background())
+	defer rollback(tx)
 	if err != nil {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil, false
@@ -691,11 +685,11 @@ func incrementVersion(tx pgx.Tx, v int32, uid string) (int32, bool) {
 func getTodos(tx pgx.Tx, uid string) [][2]string {
 	query := "SELECT id, value FROM todos WHERE user_id = $1 ORDER BY created"
 	rows, err := tx.Query(context.Background(), query, uid)
-	defer rows.Close()
 	if err != nil {
 		log.Printf("Failed to get todos for UID \"%v\": %v", uid, err)
 		return nil
 	}
+	defer rows.Close()
 	var id, value string
 	todos, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) ([2]string, error) {
 		err := row.Scan(&id, &value)
@@ -723,11 +717,21 @@ func getVersion(tx pgx.Tx, uid string) (int32, bool) {
 	return v, true
 }
 
-func writeJson(w http.ResponseWriter, v any) {
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	enc := json.NewEncoder(w)
 	err := enc.Encode(v)
 	if err != nil {
 		log.Println(err)
 	}
+}
+
+// rollback attempts to rollback the given transaction, and logs any error that
+// occurs. rollback is a no-op if the transaction is already committed/aborted.
+func rollback(tx pgx.Tx) {
+	err := tx.Rollback(context.Background())
+	if err == nil || err == pgx.ErrTxClosed {
+		return
+	}
+	log.Println(err)
 }
