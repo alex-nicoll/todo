@@ -53,13 +53,13 @@ type getTodosResp struct {
 type deleteTodoRqst struct {
 	Operation string `json:"operation"`
 	Version   int32  `json:"version"`
-	Id        string `json:"id"`
+	ID        string `json:"id"`
 }
 
 type updateTodoRqst struct {
 	Operation string `json:"operation"`
 	Version   int32  `json:"version"`
-	Id        string `json:"id"`
+	ID        string `json:"id"`
 	Value     string `json:"value"`
 }
 
@@ -75,7 +75,7 @@ type appendTodoRqst struct {
 
 type appendTodoResp struct {
 	Version int32  `json:"version"`
-	Id      string `json:"id"`
+	ID      string `json:"id"`
 }
 
 // Refresh requests do not return any JSON if the client's todos are up-to-date.

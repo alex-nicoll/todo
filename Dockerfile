@@ -29,7 +29,6 @@ RUN \
 --mount=type=cache,target=/go/pkg/mod \
 --mount=type=cache,target=/root/.cache/go-build \
 --mount=type=cache,target=/root/.cache/golangci-lint \
-#golangci-lint run -E gofmt,revive --exclude-use-default=false
 golangci-lint run -E gofmt,revive
 
 FROM go-base AS go-build
