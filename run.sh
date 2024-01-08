@@ -1,5 +1,13 @@
 #!/bin/sh
 
+if [ -z $JWT_SIGNING_KEY ]; then
+  echo JWT_SIGNING_KEY not set
+  exit 1
+fi
+if [ -z $DB_URL ]; then
+  echo DB_URL not set
+  exit 1
+fi
 SCRIPT_PATH=$(dirname $(realpath $0))
 TAG=$1
 if [ -z $TAG ]; then
