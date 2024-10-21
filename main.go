@@ -201,10 +201,12 @@ func (h *apiHandler) serveLogin(w http.ResponseWriter, r *loginRqst) {
 		writeJSON(w, &loginResp{DidLogin: false})
 		return
 	}
-	if !h.login(w, uid) {
+	cookie := h.createCookie(uid)
+	if cookie == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	http.SetCookie(w, cookie)
 	writeJSON(w, &loginResp{DidLogin: true})
 }
 
@@ -217,20 +219,19 @@ func getUIDAndPassword(pool *pgxpool.Pool, name string) (uid string, pwd string,
 	return
 }
 
-func (h *apiHandler) login(w http.ResponseWriter, uid string) bool {
+func (h *apiHandler) createCookie(uid string) *http.Cookie {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"uid": uid})
 	signedString, err := token.SignedString(h.jwtSigningKey)
 	if err != nil {
 		log.Printf("Failed to sign jwt: %v", err)
-		return false
+		return nil
 	}
-	http.SetCookie(w, &http.Cookie{
+	return &http.Cookie{
 		Name:     h.cookieName,
 		Value:    signedString,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
-	})
-	return true
+	}
 }
 
 func (h *apiHandler) serveGetUsername(w http.ResponseWriter, r *http.Request) {
@@ -276,15 +277,18 @@ func getUsername(pool *pgxpool.Pool, uid string) (name string, err error) {
 }
 
 func (h *apiHandler) serveCreateUser(w http.ResponseWriter, r *createUserRqst) {
-	resp := h.txCreateUser(w, r)
+	resp, cookie := h.txCreateUser(r)
 	if resp == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	if cookie != nil {
+		http.SetCookie(w, cookie)
+	}
 	writeJSON(w, resp)
 }
 
-func (h *apiHandler) txCreateUser(w http.ResponseWriter, r *createUserRqst) *createUserResp {
+func (h *apiHandler) txCreateUser(r *createUserRqst) (resp *createUserResp, cookie *http.Cookie) {
 	tx, err := h.pool.BeginTx(context.Background(), pgx.TxOptions{
 		IsoLevel:       pgx.Serializable,
 		AccessMode:     pgx.ReadWrite,
@@ -293,28 +297,32 @@ func (h *apiHandler) txCreateUser(w http.ResponseWriter, r *createUserRqst) *cre
 	defer rollback(tx)
 	if err != nil {
 		log.Printf("Failed to start transaction: %v", err)
-		return nil
+		return
 	}
 	exists, ok := checkUsername(tx, r.Username)
 	if !ok {
-		return nil
+		return
 	}
 	if exists {
-		return &createUserResp{IsNameTaken: true}
+		resp = &createUserResp{IsNameTaken: true}
+		return
 	}
 	uid := createUser(tx, r.Username, r.Password)
 	if uid == "" {
-		return nil
+		return
 	}
-	if !h.login(w, uid) {
-		return nil
+	c := h.createCookie(uid)
+	if c == nil {
+		return
 	}
 	err = tx.Commit(context.Background())
 	if err != nil {
 		log.Printf("Failed to commit transaction: %v", err)
-		return nil
+		return
 	}
-	return &createUserResp{IsNameTaken: false}
+	resp = &createUserResp{IsNameTaken: false}
+	cookie = c
+	return
 }
 
 // checkUsername checks whether the given username exists. If an error occurs,
