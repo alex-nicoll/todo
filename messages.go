@@ -71,11 +71,11 @@ type mutateTodoResp struct {
 type appendTodoRqst struct {
 	Operation string `json:"operation"`
 	Version   int32  `json:"version"`
+	ID        string `json:"id"`
 }
 
 type appendTodoResp struct {
-	Version int32  `json:"version"`
-	ID      string `json:"id"`
+	Version int32 `json:"version"`
 }
 
 // Refresh requests do not return any JSON if the client's todos are up-to-date.

@@ -7,29 +7,10 @@ import {
 } from "@mui/material";
 import { cyan, indigo } from '@mui/material/colors';
 import { ThemeProvider, createTheme } from "@mui/material/styles";
-import { AppBarCenter } from "./appBarCenter";
-import { AppBarCenterFsm } from "./appBarCenterFsm";
-import { AppBarRight } from "./appBarRight";
-import { AppBarRightFsm } from "./appBarRightFsm";
-import { Content } from "./content";
-import { ContentFsm } from "./contentFsm";
-import { Dispatcher } from "./dispatcher";
+import { memo } from "react";
+import { AppStateConsumer } from "./appStateConsumer";
 
-type AppBarAndContentProps = {
-  apiUrl: string;
-  dispatcher: Dispatcher;
-  appBarCenterFsm: AppBarCenterFsm;
-  appBarRightFsm: AppBarRightFsm;
-  contentFsm: ContentFsm;
-};
-
-export function AppBarAndContent({
-  apiUrl,
-  dispatcher, 
-  appBarCenterFsm,
-  appBarRightFsm,
-  contentFsm,
-}: AppBarAndContentProps) {
+export const AppBarAndContent = memo(function AppBarAndContent() {
   const theme = createTheme({
     palette: {
       primary: indigo,
@@ -56,19 +37,15 @@ export function AppBarAndContent({
           </Typography>
         </Box>
         <Box sx={{ flex: "1", display: "flex", justifyContent: "center" }}>
-          <AppBarCenter fsm={appBarCenterFsm} />
+          <AppStateConsumer getNodeFromState={(state) => state.appBarCenter} />
         </Box>
         <Box sx={{ flex: "1", display: "flex", justifyContent: "right", overflow: "hidden" }}>
-          <AppBarRight
-            fsm={appBarRightFsm}
-            apiUrl={apiUrl}
-            dispatcher={dispatcher}
-          />
+          <AppStateConsumer getNodeFromState={(state) => state.appBarRight} />
         </Box>
       </AppBar>
       <Container maxWidth="sm" sx={{ marginTop: appBarHeight }}>
-        <Content fsm={contentFsm} apiUrl={apiUrl} dispatcher={dispatcher} />
+        <AppStateConsumer getNodeFromState={(state) => state.content} />
       </Container>
     </ThemeProvider>
   );
-}
+});

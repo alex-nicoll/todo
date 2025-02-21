@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"math"
@@ -503,6 +504,10 @@ func checkVersion(tx pgx.Tx, uid string, version int32) (resp *versionMismatchRe
 
 func (h *apiHandler) serveAppendTodo(w http.ResponseWriter, r *appendTodoRqst, uid string) {
 	resp := h.txAppendTodo(r, uid)
+	if resp == "bad request" {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	if resp == nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
@@ -524,8 +529,11 @@ func (h *apiHandler) txAppendTodo(r *appendTodoRqst, uid string) any {
 		log.Printf("Failed to start transaction: %v", err)
 		return nil
 	}
-	id := appendTodo(tx, uid)
-	if id == "" {
+	appendResult := appendTodo(tx, r.ID, uid)
+	if appendResult == "exists" {
+		return "bad request"
+	}
+	if appendResult == "failure" {
 		return nil
 	}
 	version, ok := getVersion(tx, uid)
@@ -544,7 +552,6 @@ func (h *apiHandler) txAppendTodo(r *appendTodoRqst, uid string) any {
 		}
 		return &appendTodoResp{
 			Version: newVersion,
-			ID:      id,
 		}
 	}
 	log.Println("version mismatch")
@@ -636,24 +643,30 @@ func mutateTodo(tx pgx.Tx, op execOperation, id string, uid string) string {
 	return "success"
 }
 
-// appendTodo creates a new todo for the given user ID.
-// It returns the ID of the todo.
-// If an error occurs, appendTodo logs the error and returns "".
-func appendTodo(tx pgx.Tx, uid string) string {
-	id := uuid.NewString()
+// appendTodo creates a new todo with the given ID and user ID.
+// It returns "success" if the operation succeeded, "exists" if the todo already
+// exists, or "failure" if the operation failed for some other reason.
+// If the operation fails, appendTodo logs the error.
+func appendTodo(tx pgx.Tx, id string, uid string) string {
 	cmd := "INSERT INTO todos (id, user_id, value) VALUES ($1, $2, '')"
 	ct, err := tx.Exec(context.Background(), cmd, id, uid)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			log.Printf("Failed to append todo with ID %v and UID %v. Todo already "+
+				"exists.", id, uid)
+			return "exists"
+		}
 		log.Printf("Failed to append todo for UID %v: %v", uid, err)
-		return ""
+		return "failure"
 	}
 	rowsAffected := ct.RowsAffected()
 	if rowsAffected != 1 {
 		log.Printf("Failed to append todo for UID %v. Unexpected number "+
 			"of rows affected (%v)", uid, rowsAffected)
-		return ""
+		return "failure"
 	}
-	return id
+	return "success"
 }
 
 // incrementVersion increments the todo list version for the user with the

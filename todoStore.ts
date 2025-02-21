@@ -1,62 +1,21 @@
-import { callApi, callApiNoParse, containsJson, parseJson } from "./api";
-import { Dispatcher } from "./dispatcher";
-import { ActionTag } from "./actions";
-import { SyncStore } from "./syncStore";
+import { RawTodos } from "./actions";
+import { noop } from "./noop";
 
-export type TodoStoreArgs = {
-  /** The URL with which API calls should be executed */
-  apiUrl: string;
-  /** 
-   * The {@link Dispatcher} through which {@link ActionTag.SyncError} actions
-   * will be dispatched 
-   */
-  dispatcher: Dispatcher;
-  /**
-   * The {@link SyncStore} associated with this TodoStore. It will be
-   * incremented and decremented when appropriate.
-   */
-  syncStore: SyncStore;
-  /** The initial todo list version */
-  version: number;
-  /**
-   * A map from todo ID to todo value. The map must not be modified after being
-   * passed to {@link newTodoStore}.
-   */
-  todos: Map<string, string>;
-}
+export type TodoStore = ReturnType<typeof createTodoStore>;
 
-export type TodoStore = ReturnType<typeof newTodoStore>;
+// todo: Can we use MobX or something similar to remove this boilerplate?
 
 /**
- * TodoStore contains the state of the todo list along with methods for
- * changing the list and replicating those changes to the server.
-
- * TodoStore also solves the problem of having the text field associated with
- * each todo render independently, which improves performance when typing.
- * I.e., when the user types, only the text field that they are typing into
- * renders - not the entire todo list. This can be achieved by having text field
- * React components call {@link subscribeToValue} in an effect. A list
- * component, on the other hand, might call {@link subscribeToKeys} in an
- * effect.
+ * createTodoStore takes {@link RawTodos} and produces a key-value store that
+ * can be efficiently modified and subscribed to.
  */
-export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: TodoStoreArgs) {
+export function createTodoStore(todos: RawTodos) {
 
-  /**
-   * lastTask is a queue of tasks implemented as a Promise chain.
-   * It allows operations to be performed serially so that each request contains
-   * the correct todo list version.
-   */
-  let lastTask = Promise.resolve();
+  let todoMap = createTodoMap(todos);
 
-  /**
-   * todosUpdating is the set of todo IDs for which there are pending update
-   * operations.
-   */
-  const todosUpdating = new Set<string>();
+  let keySubscriber = noop;
 
-  let keySubscriber: (() => void) | undefined;
-
-  const mapValueSubscribers = new Map<string, () => void>();
+  const valueSubscriberMap = new Map<string, () => void>();
 
   /**
    * subscribeToKeys registers a callback to be invoked whenever the todo IDs
@@ -67,7 +26,9 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: 
    */
   function subscribeToKeys(callback: () => void) {
     keySubscriber = callback;
-    return () => keySubscriber = undefined;
+    return () => {
+      keySubscriber = noop;
+    };
   }
 
   /**
@@ -78,133 +39,66 @@ export function newTodoStore({ apiUrl, dispatcher, syncStore, version, todos }: 
    * subscribeToValue returns a function that unregisters the callback.
    */
   function subscribeToValue(id: string, callback: () => void) {
-    mapValueSubscribers.set(id, callback);
+    valueSubscriberMap.set(id, callback);
     return () => {
-      mapValueSubscribers.delete(id);
-      return undefined;
+      valueSubscriberMap.delete(id);
+    };
+  }
+
+  function get(id: string) {
+    return todoMap.get(id);
+  }
+  
+  function ids() {
+    return todoMap.keys();
+  }
+
+  function has(id: string) {
+    return todoMap.has(id);
+  }
+
+  function update(id: string, value: string) {
+    if (!todoMap.has(id)) {
+      throw new Error(`Failed to update todo with ID=${id}.\nThe todo does not exist.`)
     }
+    todoMap.set(id, value);
+    valueSubscriberMap.get(id)?.();
   }
 
-  /** getTodos returns a map from todo ID to todo value. */
-  function getTodos() {
-    return todos;
-  }
-
-  function deleteTodo(id: string) {
-    todos.delete(id);
-    keySubscriber!();
-    enqueue(() => callApiWithVersion("deleteTodo", { id }));
-  }
-
-  async function updateTodo(id: string, value: string) {
-    todos.set(id, value);
-    mapValueSubscribers.get(id)!();
-    if (todosUpdating.has(id)) {
-      return;
+  function appendNew(id: string) {
+    if (todoMap.has(id)) {
+      throw new Error(`Failed to append new todo with ID=${id}.\nThe todo already exists.`)
     }
-    syncStore.increment();
-    todosUpdating.add(id);
-    // Wait for 2 seconds.
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    todosUpdating.delete(id);
-    if (!todos.has(id)) {
-      // todo was deleted while we were waiting.
-      syncStore.decrement();
-      return;
-    }
-    // Instead of using enqueue, update lastTask directly to avoid incrementing
-    // and decrementing the sync count an additional time.
-    lastTask = lastTask.then(
-      () => callApiWithVersion("updateTodo", { id, value: todos.get(id) })
-    );
-    await lastTask;
-    syncStore.decrement();
+    todoMap.set(id, "");
+    keySubscriber();
   }
 
-  async function appendTodo() {
-    const result = await enqueue(() => callApiWithVersion("appendTodo"));
-    if (result === "done") {
-      return;
+  function remove(id: string) {
+    if (!todoMap.delete(id)) {
+      throw new Error(`Failed to delete todo with ID=${id}.\nThe todo does not exist.`)
     }
-    todos.set(result.id, "");
-    keySubscriber!();
+    keySubscriber();
   }
 
-  async function refreshTodos() {
-    enqueue(async () => {
-      const resp = await callApiNoParse(apiUrl, "refreshTodos", { version });
-      if (resp === "failed") {
-        dispatcher.dispatch({ tag: ActionTag.SyncError });
-        return;
-      }
-      if (!containsJson(resp)) {
-        // Already up-to-date.
-        console.log("up to date");
-        return;
-      }
-      const result = await parseJson(resp);
-      if (result === "failed") {
-        dispatcher.dispatch({ tag: ActionTag.SyncError });
-        return;
-      }
-      console.log("updating todos");
-      version = result.version;
-      todos = newTodosMap(result.todos);
-      keySubscriber!();
-    });
-  }
-
-  /**
-   * enqueue adds a potentially async function to the back of the task queue. It
-   * returns a Promise representing the function's result.
-   * While the task is queued or executing, the sync count is increased by one.
-   */
-  function enqueue<T>(task: () => (T | Promise<T>)) {
-    syncStore.increment();
-    const result = lastTask.then(task);
-    lastTask = result.then(syncStore.decrement);
-    return result;
-  }
-
-  /**
-   * callApiWithVersion calls the API and partially handles the response. It
-   * includes the current todo list version in the request, and updates the
-   * current version to match the version in the response.
-   *
-   * It returns "done" if the request failed, or if the request succeeded and
-   * the todo list has been downloaded and rerendered due to a version mismatch
-   * detected by the server. If the request failed, an 
-   * {@link ActionTag.SyncError} action is dispatched.
-   *
-   * Otherwise, it returns the response body parsed as JSON.
-   */
-  async function callApiWithVersion(operation: "deleteTodo" | "updateTodo" | "appendTodo", args?: object) {
-    const result = await callApi(apiUrl, operation, { version, ...args });
-    if (result === "failed") {
-      dispatcher.dispatch({ tag: ActionTag.SyncError });
-      return "done";
-    }
-    version = result.version;
-    if (result.todos !== undefined) {
-      todos = newTodosMap(result.todos);
-      keySubscriber!();
-      return "done";
-    }
-    return result;
+  function replaceAll(todos: RawTodos) {
+    todoMap = createTodoMap(todos);
+    keySubscriber();
   }
 
   return {
     subscribeToKeys,
     subscribeToValue,
-    getTodos,
-    deleteTodo,
-    updateTodo,
-    appendTodo,
-    refreshTodos
-  };
+    get,
+    ids,
+    has,
+    update,
+    appendNew,
+    remove,
+    replaceAll
+  }
 }
 
-export function newTodosMap(todos: [string, string][]) {
+export function createTodoMap(todos: RawTodos) {
   const todosMap = new Map<string, string>();
   for (const [id, value] of todos) {
     todosMap.set(id, value)
